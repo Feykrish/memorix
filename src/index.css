@@ -1,0 +1,48 @@
+@import "tailwindcss";
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
+
+@theme {
+  --color-primary: #534AB7;
+  --color-primary-light: #6E65D0;
+  --color-primary-dark: #3F3793;
+  --color-success: #1D9E75;
+  --color-error: #E24B4A;
+  --color-reminder: #EF9F27;
+  --color-bg: #ffffff;
+  --color-bg2: #f9fafb;
+  --color-card: #ffffff;
+  --color-text: #111827;
+  --color-text2: #6b7280;
+  --color-text3: #9ca3af;
+  --color-border: #f3f4f6;
+  --color-border2: #e5e7eb;
+  --font-sans: 'Inter', system-ui, sans-serif;
+}
+
+.dark {
+  --color-primary: #7F77DD;
+  --color-primary-light: #9990CC;
+  --color-primary-dark: #6E65D0;
+  --color-bg: #0F0F1A;
+  --color-bg2: #1A1A2E;
+  --color-card: #16213E;
+  --color-text: #EEEDFE;
+  --color-text2: #9990CC;
+  --color-text3: #6b6199;
+  --color-border: #2A2A4A;
+  --color-border2: #2A2A4A;
+}
+
+body {
+  margin: 0;
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  background-color: var(--color-bg);
+  color: var(--color-text);
+  transition: background-color 0.3s, color 0.3s;
+}
+
+#root {
+  min-height: 100dvh;
+}
