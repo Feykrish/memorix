@@ -124,7 +124,7 @@ app.post('/api/claude', async (req, res) => {
 app.use(express.static(join(__dirname, 'dist')));
 
 // Toutes les routes non-API → index.html (SPA routing)
-app.get('*', (req, res) => {
+app.get(/.*/, (req, res) => {
   res.sendFile(join(__dirname, 'dist', 'index.html'));
 });
 
