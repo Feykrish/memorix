@@ -59,6 +59,7 @@ export default function Session() {
   const [allResults, setAllResults] = useState([]);
   const [pendingCount, setPendingCount] = useState(0);
   const [newWrongCount, setNewWrongCount] = useState(0); // Only counts wrong on NEW questions
+  const [loadingFromAPI, setLoadingFromAPI] = useState(false); // true = appel API en cours
   const [reviewCount, setReviewCount] = useState(0); // How many review questions at start
   const [showPerfectMessage, setShowPerfectMessage] = useState(false);
   const [showMaxPending, setShowMaxPending] = useState(false);
@@ -141,7 +142,11 @@ export default function Session() {
 
     console.log(`🆕 Génération de nouvelles questions (${currentPending} en attente < ${MAX_PENDING})`);
     setLoading(true);
+    setLoadingFromAPI(false); // réinitialiser — sera mis à true si l'API est appelée
     setApiError(null);
+
+    // Basculer le loader "API" après 800ms si toujours en chargement (= cache absent)
+    const apiTimer = setTimeout(() => setLoadingFromAPI(true), 800);
 
     try {
       const history = getAskedQuestions(category, sub);
@@ -166,7 +171,9 @@ export default function Session() {
       console.error('❌ Failed to generate questions:', err);
       setApiError(err.message);
     } finally {
+      clearTimeout(apiTimer);
       setLoading(false);
+      setLoadingFromAPI(false);
     }
   }
 
@@ -359,7 +366,14 @@ export default function Session() {
     return (
       <div className="min-h-dvh bg-bg flex flex-col items-center justify-center px-8">
         <div className="text-5xl mb-6 animate-pulse">🧠</div>
-        <p className="text-lg font-semibold text-primary text-center">{s.loadingQuestions}</p>
+        <p className="text-lg font-semibold text-primary text-center">
+          {loadingFromAPI
+            ? '🧠 L\'IA prépare vos questions personnalisées...'
+            : '📚 Chargement de vos questions...'}
+        </p>
+        {loadingFromAPI && (
+          <p className="text-sm text-text3 mt-2 animate-pulse">quelques secondes...</p>
+        )}
       </div>
     );
   }

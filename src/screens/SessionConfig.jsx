@@ -3,6 +3,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useLang } from '../context/LangContext';
 import { categories } from '../data/categories';
 import { findSessionByCategorySub, configureSession } from '../data/sessionStore';
+import { prefetchQuestions } from '../lib/questionsCache';
 import HomeButton from '../components/HomeButton';
 import BackButton from '../components/BackButton';
 import ThemeToggle from '../components/ThemeToggle';
@@ -20,6 +21,15 @@ export default function SessionConfig() {
 
   const [learnGoal, setLearnGoal] = useState(5);
   const [difficulty, setDifficulty] = useState('auto');
+
+  // Lancer le prefetch dès que l'objectif ou la difficulté change
+  // (le résultat sera prêt quand l'utilisateur clique "C'est parti !")
+  const triggerPrefetch = (goal, diff) => {
+    prefetchQuestions(category, sub, diff, 'fr', goal);
+  };
+
+  // Prefetch immédiat au montage avec les valeurs par défaut
+  useState(() => { triggerPrefetch(5, 'auto'); });
 
   const sc = t.sessionConfig;
   const cat = categories.find((c) => c.key === category);
@@ -68,7 +78,7 @@ export default function SessionConfig() {
             {LEARN_GOALS.map((n) => (
               <button
                 key={n}
-                onClick={() => setLearnGoal(n)}
+                onClick={() => { setLearnGoal(n); triggerPrefetch(n, difficulty); }}
                 className={`flex-1 py-4 rounded-xl font-bold text-xl transition-all cursor-pointer ${
                   learnGoal === n
                     ? 'bg-primary text-white shadow-lg shadow-primary/20 scale-105'
@@ -89,7 +99,7 @@ export default function SessionConfig() {
             {DIFFICULTIES.map((d) => (
               <button
                 key={d}
-                onClick={() => setDifficulty(d)}
+                onClick={() => { setDifficulty(d); triggerPrefetch(learnGoal, d); }}
                 className={`w-full py-3 px-4 rounded-xl font-semibold text-sm text-left transition-all cursor-pointer flex items-center justify-between ${
                   difficulty === d
                     ? 'bg-primary text-white'

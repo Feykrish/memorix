@@ -1,4 +1,4 @@
-import { getCachedQuestions, saveToCache } from '../lib/questionsCache';
+import { getCachedQuestions, saveToCache, getPrefetched } from '../lib/questionsCache';
 
 const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:3001';
 
@@ -45,17 +45,33 @@ Réponds UNIQUEMENT en JSON valide, sans texte supplémentaire.`;
 export async function generateQuestions(category, subCategory, difficulty, count, alreadyAsked = [], langue = 'fr') {
   console.log(`🔍 generateQuestions: ${category} · ${subCategory}, difficulty=${difficulty}, count=${count}, alreadyAsked=${alreadyAsked.length}`);
 
-  // 1. Try cache first — exclude already-asked
-  const cached = await getCachedQuestions(category, subCategory, difficulty, langue, count * 2);
+  // 1. Vérifier d'abord le prefetch (résultat déjà chargé depuis SessionConfig)
+  const prefetched = getPrefetched(category, subCategory, difficulty, langue);
+  let cached = null;
+  if (prefetched instanceof Promise) {
+    console.log('⚡ Prefetch en cours — attente du résultat...');
+    cached = await prefetched;
+  } else if (prefetched !== undefined) {
+    cached = prefetched;
+  }
+
+  // 2. Si pas de prefetch, requête directe
+  if (cached === null || cached === undefined) {
+    cached = await getCachedQuestions(category, subCategory, difficulty, langue, count * 2);
+  }
+
   if (cached) {
     const filtered = cached.filter((q) => !alreadyAsked.includes(q.text));
-    console.log(`📦 Cache: ${cached.length} total, ${filtered.length} after filtering already-asked`);
+    console.log(`Cache utilisé : oui — ${cached.length} total, ${filtered.length} après filtrage`);
     if (filtered.length >= count) {
       return filtered.slice(0, count);
     }
+    console.log(`⚠️ Cache insuffisant après filtrage (${filtered.length} < ${count}) — appel API`);
+  } else {
+    console.log('Cache utilisé : non — appel API Claude');
   }
 
-  // 2. Call Claude API with full history to avoid repeats
+  // 3. Call Claude API with full history to avoid repeats
   console.log(`🤖 Calling Claude API — ${alreadyAsked.length} questions to avoid`);
 
   // Only send last 50 questions to avoid exceeding token limits
