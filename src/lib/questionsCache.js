@@ -1,51 +1,61 @@
 import { supabase } from './supabase';
 
-const CACHE_THRESHOLD = 10; // Réduit de 20 → 10 pour utiliser le cache plus souvent
+const CACHE_THRESHOLD = 5;
 
 /**
- * Get cached questions for a category/sub/level combo.
- * Returns null if not enough cached or Supabase is offline.
+ * Get cached questions for a category/sub combo.
+ * Ignores niveau/langue filters to maximize cache hits.
+ * Returns array of question objects or null.
  */
 export async function getCachedQuestions(categorie, sousCategorie, niveau, langue, count) {
   if (!supabase) return null;
 
+  console.log('🔍 Recherche cache pour:', categorie, sousCategorie);
+
   try {
-    const fetchCount = Math.max(count * 2, 20);
     const { data, error } = await supabase
       .from('questions_cache')
       .select('id, contenu, utilisation_count')
       .eq('categorie', categorie)
       .eq('sous_categorie', sousCategorie)
-      .eq('niveau', niveau)
-      .eq('langue', langue)
-      .order('utilisation_count', { ascending: true }) // moins utilisées en premier
-      .limit(fetchCount);                               // ← limit() côté Supabase, pas en mémoire
+      .order('utilisation_count', { ascending: true })
+      .limit(50);
 
     if (error) {
       console.warn('Cache read error:', error.message);
       return null;
     }
 
+    console.log('📊 Résultat cache:', data?.length ?? 0, 'entrées trouvées');
+
     if (!data || data.length < CACHE_THRESHOLD) {
       console.log(`📭 Cache MISS — ${data?.length || 0} questions (min ${CACHE_THRESHOLD})`);
       return null;
     }
 
-    console.log(`✅ Cache HIT — ${data.length} questions disponibles`);
+    // flatMap handles: single object, array, or {questions:[...]} per row
+    const allQuestions = data.flatMap((row) => {
+      const c = row.contenu;
+      if (Array.isArray(c)) return c;
+      if (c?.questions && Array.isArray(c.questions)) return c.questions;
+      if (c && typeof c === 'object') return [c];
+      return [];
+    });
 
-    // Shuffler et prendre les `count` premières
-    const shuffled = data.sort(() => Math.random() - 0.5).slice(0, count);
+    console.log(`✅ Cache HIT — ${allQuestions.length} questions disponibles après flatMap`);
 
-    // Incrémenter le compteur en une seule requête (batch update via in())
-    const ids = shuffled.map((q) => q.id);
-    supabase
-      .from('questions_cache')
-      .update({ utilisation_count: supabase.rpc ? undefined : 1 }) // no-op placeholder
-      .in('id', ids)
-      .catch(() => {});
-    // Update simple non-bloquant (best-effort, pas attendu)
+    if (allQuestions.length < CACHE_THRESHOLD) {
+      console.log('📭 Pas assez de questions après extraction contenu');
+      return null;
+    }
+
+    // Shuffle and take count
+    const shuffled = allQuestions.sort(() => Math.random() - 0.5).slice(0, count);
+
+    // Increment usage counts (best-effort, non-blocking)
+    const ids = data.map((q) => q.id);
     Promise.all(
-      shuffled.map((q) =>
+      data.map((q) =>
         supabase
           .from('questions_cache')
           .update({ utilisation_count: (q.utilisation_count || 0) + 1 })
@@ -53,7 +63,7 @@ export async function getCachedQuestions(categorie, sousCategorie, niveau, langu
       )
     ).catch(() => {});
 
-    return shuffled.map((q) => q.contenu);
+    return shuffled;
   } catch (err) {
     console.warn('Cache error:', err.message);
     return null;
@@ -92,14 +102,13 @@ export async function saveToCache(questions, categorie, sousCategorie, niveau, l
 }
 
 /**
- * Prefetch — lance le chargement en arrière-plan sans bloquer l'UI.
- * Stocke le résultat dans un Map global pour que Session.jsx le récupère.
+ * Prefetch — load in background, store result in Map for Session to consume.
  */
 const prefetchStore = new Map();
 
 export function prefetchQuestions(category, subCategory, difficulty, langue, count) {
   const key = `${category}::${subCategory}::${difficulty}::${langue}`;
-  if (prefetchStore.has(key)) return; // déjà en cours
+  if (prefetchStore.has(key)) return;
 
   console.log(`⚡ Prefetch lancé: ${key}`);
   const promise = getCachedQuestions(category, subCategory, difficulty, langue, count * 2)
@@ -112,12 +121,12 @@ export function prefetchQuestions(category, subCategory, difficulty, langue, cou
       prefetchStore.set(key, null);
     });
 
-  prefetchStore.set(key, promise); // stocke la Promise pendant le chargement
+  prefetchStore.set(key, promise);
 }
 
 export function getPrefetched(category, subCategory, difficulty, langue) {
   const key = `${category}::${subCategory}::${difficulty}::${langue}`;
   const val = prefetchStore.get(key);
-  prefetchStore.delete(key); // consommer une seule fois
-  return val; // peut être une Promise, un tableau, ou null
+  prefetchStore.delete(key);
+  return val;
 }

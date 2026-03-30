@@ -60,9 +60,20 @@ export async function generateQuestions(category, subCategory, difficulty, count
     cached = await getCachedQuestions(category, subCategory, difficulty, langue, count * 2);
   }
 
-  if (cached) {
-    const filtered = cached.filter((q) => !alreadyAsked.includes(q.text));
-    console.log(`Cache utilisé : oui — ${cached.length} total, ${filtered.length} après filtrage`);
+  // Normalize: handle flat array or {questions:[...]} wrapper
+  const cachedArr = Array.isArray(cached)
+    ? cached
+    : cached?.questions && Array.isArray(cached.questions)
+    ? cached.questions
+    : null;
+
+  console.log(`📦 Questions disponibles après filtre: ${cachedArr?.length ?? 0}`);
+
+  if (cachedArr && cachedArr.length > 0) {
+    const filtered = cachedArr.filter(
+      (q) => !alreadyAsked.includes(q.id) && !alreadyAsked.includes(q.text)
+    );
+    console.log(`Cache utilisé : oui — ${cachedArr.length} total, ${filtered.length} après filtrage`);
     if (filtered.length >= count) {
       return filtered.slice(0, count);
     }
