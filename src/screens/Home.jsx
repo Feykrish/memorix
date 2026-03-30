@@ -10,16 +10,16 @@ import LangSelector from '../components/LangSelector';
 import ThemeToggle from '../components/ThemeToggle';
 import ContactModal from '../components/ContactModal';
 
-const localeMap = { fr: 'fr-FR', en: 'en-US', es: 'es-ES', de: 'de-DE', tr: 'tr-TR' };
 const isDev = true; // visible pour tests — à passer false avant lancement public
 
-function formatDate(lang) {
+function formatDate() {
   const offset = getSimDayOffset();
   const d = new Date();
   d.setDate(d.getDate() + offset);
-  return d.toLocaleDateString(localeMap[lang] || 'fr-FR', {
-    weekday: 'long', day: 'numeric', month: 'long',
-  });
+  const jour  = String(d.getDate()).padStart(2, '0');
+  const mois  = String(d.getMonth() + 1).padStart(2, '0');
+  const annee = d.getFullYear();
+  return `${jour}/${mois}/${annee}`;
 }
 
 export default function Home() {
@@ -97,7 +97,7 @@ export default function Home() {
         <div className="flex items-center justify-between">
           <h1 className="text-2xl font-extrabold text-primary tracking-tight">Memorix</h1>
           <div className="flex items-center gap-2">
-            <span className="text-sm text-text3 font-medium capitalize hidden sm:block">{formatDate(lang)}</span>
+            <span className="text-sm text-text3 font-medium hidden sm:block">{formatDate()}</span>
             <ThemeToggle />
             <button
               onClick={() => setShowTutorial(true)}
@@ -193,7 +193,7 @@ export default function Home() {
                           <p className="text-sm font-bold text-text flex items-center gap-1.5 flex-wrap">
                             <span>{catLabel} · {subLabel}</span>
                             {s.category !== 'freelearn' && (() => {
-                              const prog = getProgression(s.category);
+                              const prog = getProgression(s.category, s.sub);
                               const badge = getNiveauBadge(prog.niveau);
                               return (
                                 <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${badge.cls}`}>

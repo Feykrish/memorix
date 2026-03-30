@@ -1,24 +1,27 @@
 /**
- * Tracks cumulative correct answers per category to drive difficulty progression.
- * Stored in localStorage under "memorix-progression".
+ * Tracks correct answers per category+subcategory to drive difficulty progression.
+ * Storage: individual localStorage keys — `bonnes_reponses_${categorie}_${sousCategorie}`
  * Level thresholds: 0-14 = débutant, 15-39 = intermédiaire, 40+ = expert
  */
 
-const STORAGE_KEY = 'memorix-progression';
-
-function getStore() {
-  try { return JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}'); }
-  catch { return {}; }
+// ─── Key helper ───────────────────────────────────────────────────────
+function makeKey(categorie, sousCategorie = '') {
+  return `bonnes_reponses_${categorie}_${sousCategorie}`;
 }
 
-function saveStore(store) {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(store));
+function lireCompteur(categorie, sousCategorie = '') {
+  return parseInt(localStorage.getItem(makeKey(categorie, sousCategorie)) || '0', 10);
 }
 
+function ecrireCompteur(categorie, sousCategorie = '', valeur) {
+  localStorage.setItem(makeKey(categorie, sousCategorie), String(valeur));
+}
+
+// ─── Level logic ──────────────────────────────────────────────────────
 export function calculerNiveau(total) {
-  if (total < 15) return 'debutant';
-  if (total < 40) return 'intermediaire';
-  return 'expert';
+  if (total >= 40) return 'expert';
+  if (total >= 15) return 'intermediaire';
+  return 'debutant';
 }
 
 export function getNiveauLabel(niveau) {
@@ -28,39 +31,71 @@ export function getNiveauLabel(niveau) {
 }
 
 export function getNiveauBadge(niveau) {
-  if (niveau === 'expert') return { emoji: '🔥', label: 'Expert', cls: 'bg-error/10 text-error' };
+  if (niveau === 'expert')       return { emoji: '🔥',  label: 'Expert',        cls: 'bg-error/10 text-error' };
   if (niveau === 'intermediaire') return { emoji: '⭐⭐', label: 'Intermédiaire', cls: 'bg-amber-500/10 text-amber-500' };
-  return { emoji: '⭐', label: 'Débutant', cls: 'bg-success/10 text-success' };
+  return                                 { emoji: '⭐',  label: 'Débutant',      cls: 'bg-success/10 text-success' };
 }
 
 export function getProgressionText(total, niveau) {
-  if (niveau === 'expert') return 'Niveau maximum atteint 🏆';
+  if (niveau === 'expert')        return 'Niveau maximum atteint 🏆';
   if (niveau === 'intermediaire') return `Intermédiaire : ${total - 15}/25 bonnes réponses`;
-  return `Débutant : ${total}/15 bonnes réponses`;
+  return                                 `Débutant : ${total}/15 bonnes réponses`;
+}
+
+// ─── Public API ───────────────────────────────────────────────────────
+
+/**
+ * Increment correct-answer counter for a category+sub pair.
+ * Returns the new total.
+ */
+export function incrementerBonnesReponses(categorie, sousCategorie = '') {
+  const actuel  = lireCompteur(categorie, sousCategorie);
+  const nouveau = actuel + 1;
+  ecrireCompteur(categorie, sousCategorie, nouveau);
+  return nouveau;
 }
 
 /**
  * Returns { total, niveau } for a category+sub pair.
- * Key format: "category::sub" for per-subcategory tracking.
  */
-export function getProgression(category, sub = '') {
-  const store = getStore();
-  const key   = sub ? `${category}::${sub}` : category;
-  const total = store[key] || 0;
+export function getProgression(categorie, sousCategorie = '') {
+  const total = lireCompteur(categorie, sousCategorie);
   return { total, niveau: calculerNiveau(total) };
 }
 
 /**
- * Add correct answers for a category+sub pair.
- * Returns { prevNiveau, newNiveau, levelUp } so the caller can show a message.
+ * Add `count` correct answers for a category+sub pair.
+ * Returns { prevNiveau, newNiveau, levelUp }.
  */
-export function addCorrectAnswers(category, count, sub = '') {
-  const store = getStore();
-  const key   = sub ? `${category}::${sub}` : category;
-  const prev  = store[key] || 0;
+export function addCorrectAnswers(categorie, count, sousCategorie = '') {
+  const prev      = lireCompteur(categorie, sousCategorie);
   const prevNiveau = calculerNiveau(prev);
-  store[key]       = prev + count;
-  const newNiveau  = calculerNiveau(store[key]);
-  saveStore(store);
+  const nouveau    = prev + count;
+  ecrireCompteur(categorie, sousCategorie, nouveau);
+  const newNiveau  = calculerNiveau(nouveau);
   return { prevNiveau, newNiveau, levelUp: newNiveau !== prevNiveau };
+}
+
+/**
+ * Simulate N correct answers for every active session (dev/test helper).
+ * sessions: array of { category, sub } objects.
+ */
+export function simulerBonnesReponses(sessions, count = 20) {
+  sessions.forEach(({ category, sub }) => {
+    const actuel  = lireCompteur(category, sub);
+    ecrireCompteur(category, sub, actuel + count);
+  });
+}
+
+/**
+ * Returns all localStorage keys managed by this store.
+ * Used by Settings reset to clean up.
+ */
+export function getAllProgressionKeys() {
+  const keys = [];
+  for (let i = 0; i < localStorage.length; i++) {
+    const k = localStorage.key(i);
+    if (k && k.startsWith('bonnes_reponses_')) keys.push(k);
+  }
+  return keys;
 }

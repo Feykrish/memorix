@@ -3,6 +3,8 @@ import { useNavigate } from 'react-router-dom';
 import { useLang } from '../context/LangContext';
 import { isNotifEnabled, setNotifEnabled, getPermissionState, requestPermission } from '../data/notificationStore';
 import { deleteAllUserData } from '../lib/supabaseSync';
+import { getSessions } from '../data/sessionStore';
+import { simulerBonnesReponses, getAllProgressionKeys } from '../data/progressionStore';
 import HomeButton from '../components/HomeButton';
 import BackButton from '../components/BackButton';
 import ThemeToggle from '../components/ThemeToggle';
@@ -15,6 +17,7 @@ export default function Settings() {
   const s = t.settings;
 
   const [showReset, setShowReset] = useState(false);
+  const [simDone, setSimDone] = useState(false);
   const [showSuggestion, setShowSuggestion] = useState(false);
   const [showBug, setShowBug] = useState(false);
   const [showRating, setShowRating] = useState(false);
@@ -26,11 +29,11 @@ export default function Settings() {
   const handleReset = () => {
     // Clear Supabase data (non-blocking)
     deleteAllUserData().catch(() => {});
-    // Clear all local Memorix data
+    // Clear all local Memorix data (memorix-* keys + bonnes_reponses_* keys)
     const keysToRemove = [];
     for (let i = 0; i < localStorage.length; i++) {
       const key = localStorage.key(i);
-      if (key && key.startsWith('memorix')) {
+      if (key && (key.startsWith('memorix') || key.startsWith('bonnes_reponses_') || key.startsWith('langue_interface'))) {
         keysToRemove.push(key);
       }
     }
@@ -38,6 +41,14 @@ export default function Settings() {
     sessionStorage.clear();
     setShowReset(false);
     navigate('/onboarding');
+  };
+
+  const handleSimuler20 = () => {
+    const sessions = getSessions();
+    if (sessions.length === 0) return;
+    simulerBonnesReponses(sessions, 20);
+    setSimDone(true);
+    setTimeout(() => setSimDone(false), 2500);
   };
 
   const handleSendSuggestion = () => {
@@ -127,6 +138,14 @@ export default function Settings() {
             className="w-full py-3 rounded-xl border-2 border-error/30 text-error font-semibold text-sm cursor-pointer hover:bg-error/5 transition-colors"
           >
             🔄 {s.resetButton}
+          </button>
+
+          {/* Dev test — simulate level-up */}
+          <button
+            onClick={handleSimuler20}
+            className="mt-3 w-full py-2 rounded-xl border border-dashed border-text3/30 text-text3 text-xs font-medium cursor-pointer hover:border-primary/30 hover:text-primary transition-colors"
+          >
+            {simDone ? '✅ +20 réponses simulées !' : '🔧 Simuler 20 bonnes réponses'}
           </button>
         </div>
 

@@ -6,18 +6,17 @@ import BackButton from '../components/BackButton';
 import ThemeToggle from '../components/ThemeToggle';
 
 export default function Journal() {
-  const { t, lang } = useLang();
+  const { t } = useLang();
   const navigate = useNavigate();
   const journal = getJournal();
   const j = t.journal;
 
-  const localeMap = { fr: 'fr-FR', en: 'en-US', es: 'es-ES', de: 'de-DE', tr: 'tr-TR' };
-
   const formatDate = (dateStr) => {
-    const d = new Date(dateStr + 'T12:00:00');
-    return d.toLocaleDateString(localeMap[lang] || 'fr-FR', {
-      weekday: 'long', day: 'numeric', month: 'long',
-    });
+    const d    = new Date(dateStr + 'T12:00:00');
+    const jour  = String(d.getDate()).padStart(2, '0');
+    const mois  = String(d.getMonth() + 1).padStart(2, '0');
+    const annee = d.getFullYear();
+    return `${jour}/${mois}/${annee}`;
   };
 
   return (
