@@ -219,20 +219,10 @@ export default function Session() {
     if (evaluating) return; // Already evaluating
 
     setEvaluating(true);
-    let correct = false;
-    let evaluation = null;
-
-    try {
-      evaluation = await evaluateAnswer(
-        question.text, question.answer, question.keywords || [], trimmed
-      );
-      correct = evaluation.isCorrect;
-    } catch {
-      const userAns = trimmed.toLowerCase();
-      const correctAns = question.answer.toLowerCase();
-      correct = userAns === correctAns || correctAns.includes(userAns) || userAns.includes(correctAns);
-      evaluation = { isCorrect: correct, result: correct ? 'correct' : 'incorrect', message: '', correction: question.answer, missing: null };
-    }
+    const evaluation = evaluateAnswer(
+      question.text, question.answer, question.keywords || [], trimmed
+    );
+    const correct = evaluation.isCorrect;
 
     console.log(`📝 Réponse évaluée: ${correct ? '✅ correct' : '❌ incorrect'} — "${question.text.slice(0, 40)}..."`);
 

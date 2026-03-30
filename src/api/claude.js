@@ -129,42 +129,75 @@ Réponds avec ce JSON exactement :
   return questions;
 }
 
-// ─── 2. Evaluate Answer ──────────────────────────────────────────────
+// ─── 2. Evaluate Answer (local, instant — no API call) ───────────────
 
-const SYSTEM_EVALUATE = `Tu es un correcteur bienveillant de Memorix.
-Évalue la réponse de l'utilisateur :
-- correct = les éléments essentiels sont présents, même formulés avec ses propres mots.
-- partiel = partiellement juste, il manque des éléments importants.
-- incorrect = faux, hors sujet ou vide.
-Sois indulgent sur l'orthographe et la formulation exacte.
-Réponds UNIQUEMENT en JSON valide, sans texte supplémentaire.`;
-
-export async function evaluateAnswer(question, correctAnswer, keywords, userAnswer) {
-  const user = `Question : "${question}"
-Bonne réponse : "${correctAnswer}"
-Mots-clés importants : ${JSON.stringify(keywords)}
-Réponse de l'utilisateur : "${userAnswer}"
-
-Réponds avec ce JSON exactement :
-{
-  "resultat": "correct|partiel|incorrect",
-  "score": 1,
-  "message": "message court d'encouragement ou de correction",
-  "correction": "explication courte de la bonne réponse",
-  "ce_qui_manquait": "ce qui manquait dans la réponse, ou null si correct"
+function normalize(str) {
+  return (str || '')
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .trim();
 }
 
-Pour le score : correct = 1, partiel = 1, incorrect = 0.`;
+export function evaluateAnswer(question, correctAnswer, keywords, userAnswer) {
+  if (!userAnswer || userAnswer.trim() === '') {
+    return {
+      result: 'incorrect',
+      score: 0,
+      isCorrect: false,
+      message: "Vous n'avez pas répondu.",
+      correction: correctAnswer,
+      missing: 'Aucune réponse fournie',
+    };
+  }
 
-  const data = await callClaude(SYSTEM_EVALUATE, user);
-  return {
-    result: data.resultat || 'incorrect',
-    score: data.score ?? (data.resultat === 'incorrect' ? 0 : 1),
-    isCorrect: (data.resultat || 'incorrect') !== 'incorrect',
-    message: data.message || '',
-    correction: data.correction || correctAnswer,
-    missing: data.ce_qui_manquait || null,
-  };
+  const userNorm = normalize(userAnswer);
+  const correctNorm = normalize(correctAnswer);
+
+  if (userNorm === correctNorm || correctNorm.includes(userNorm) || userNorm.includes(correctNorm)) {
+    return {
+      result: 'correct',
+      score: 1,
+      isCorrect: true,
+      message: 'Parfait ! Excellente réponse !',
+      correction: correctAnswer,
+      missing: null,
+    };
+  }
+
+  const kwNorms = (keywords || []).map(normalize).filter(Boolean);
+  const found = kwNorms.filter((kw) => userNorm.includes(kw));
+  const ratio = kwNorms.length > 0 ? found.length / kwNorms.length : 0;
+
+  if (ratio >= 0.6) {
+    return {
+      result: 'correct',
+      score: 1,
+      isCorrect: true,
+      message: 'Bonne réponse ! Vous avez les éléments essentiels.',
+      correction: correctAnswer,
+      missing: null,
+    };
+  } else if (ratio >= 0.3) {
+    const missing = kwNorms.filter((kw) => !userNorm.includes(kw)).join(', ');
+    return {
+      result: 'partiel',
+      score: 0,
+      isCorrect: false,
+      message: "Pas tout à fait — mais vous venez d'apprendre quelque chose !",
+      correction: correctAnswer,
+      missing: `Éléments manquants : ${missing}`,
+    };
+  } else {
+    return {
+      result: 'incorrect',
+      score: 0,
+      isCorrect: false,
+      message: "Pas tout à fait — mais vous venez d'apprendre quelque chose de nouveau !",
+      correction: correctAnswer,
+      missing: `Réponse attendue : ${correctAnswer}`,
+    };
+  }
 }
 
 // ─── 3. Generate Vocabulary ──────────────────────────────────────────
