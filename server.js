@@ -120,6 +120,62 @@ app.post('/api/claude', async (req, res) => {
   }
 });
 
+// ─── POST /api/generate-choices — dedicated MCQ choice generator ─────
+app.post('/api/generate-choices', async (req, res) => {
+  console.log('\n📨 POST /api/generate-choices');
+  const { question, reponse_correcte, categorie } = req.body;
+
+  if (!question || !reponse_correcte) {
+    return res.status(400).json({ error: 'Missing question or reponse_correcte' });
+  }
+  if (!API_KEY) {
+    return res.status(500).json({ error: 'Server has no API key configured' });
+  }
+
+  const prompt = `Pour cette question de ${categorie || 'culture générale'} : "${question}"
+La bonne réponse est : "${reponse_correcte}"
+
+Génère EXACTEMENT 3 mauvaises réponses pour un QCM. Ces réponses doivent :
+- Être du même TYPE que la bonne réponse (si c'est un chiffre, proposer d'autres chiffres plausibles ; si c'est un nom propre, proposer d'autres noms propres)
+- Ne PAS contenir de mots significatifs de la question
+- Ne PAS être des variantes orthographiques ou translittérations de "${reponse_correcte}"
+- Être des concepts complètement différents, plausibles mais clairement faux pour quelqu'un qui connaît le sujet
+
+Réponds UNIQUEMENT avec ce JSON : { "mauvaises_reponses": ["réponse1", "réponse2", "réponse3"] }`;
+
+  try {
+    const response = await fetch(API_URL, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': API_KEY,
+        'anthropic-version': '2023-06-01',
+      },
+      body: JSON.stringify({
+        model: MODEL,
+        max_tokens: 200,
+        messages: [{ role: 'user', content: prompt }],
+      }),
+    });
+
+    if (!response.ok) {
+      const errText = await response.text().catch(() => '');
+      return res.status(response.status).json({ error: `Claude API error ${response.status}`, details: errText });
+    }
+
+    const data = await response.json();
+    const text = data.content?.[0]?.text || '';
+    const jsonStr = text.replace(/```json|```/g, '').trim();
+    const result = JSON.parse(jsonStr.match(/\{[\s\S]*\}/)?.[0] || jsonStr);
+
+    console.log('   ✅ Choix générés:', result.mauvaises_reponses);
+    res.json(result);
+  } catch (err) {
+    console.error('   ❌ generate-choices error:', err.message);
+    res.status(500).json({ error: 'Failed to generate choices', details: err.message });
+  }
+});
+
 // ─── Servir le frontend React buildé ─────────────────────────────────
 app.use(express.static(join(__dirname, 'dist')));
 

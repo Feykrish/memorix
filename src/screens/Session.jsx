@@ -52,6 +52,7 @@ export default function Session() {
   const [pendingCount, setPendingCount] = useState(0);
   const [newWrongCount, setNewWrongCount] = useState(0);
   const [loadingFromAPI, setLoadingFromAPI] = useState(false);
+  const [loadingChoices, setLoadingChoices] = useState(false);
   const [reviewCount, setReviewCount] = useState(0);
   const [showPerfectMessage, setShowPerfectMessage] = useState(false);
   const [showMaxPending, setShowMaxPending] = useState(false);
@@ -137,7 +138,9 @@ export default function Session() {
         choices: r.choices || [],
         isReview: true,
       }));
-      const withChoices = await generateChoicesForQuestions(reviewQuestions);
+      setLoadingChoices(true);
+      const withChoices = await generateChoicesForQuestions(reviewQuestions, category);
+      setLoadingChoices(false);
       setQuestions(withChoices);
       setCurrentIndex(0);
       setPhase('review');
@@ -174,7 +177,9 @@ export default function Session() {
 
       addToHistory(category, sub, newQuestions.map((q) => q.text));
 
-      const withChoices = await generateChoicesForQuestions(newQuestions);
+      setLoadingChoices(true);
+      const withChoices = await generateChoicesForQuestions(newQuestions, category);
+      setLoadingChoices(false);
 
       console.log(`✅ Questions générées: ${withChoices.length}`);
       withChoices.forEach((q, i) => console.log(`   ${i + 1}. ${q.text.slice(0, 60)}...`));
@@ -206,7 +211,9 @@ export default function Session() {
         : await generateHarderQuestions(categoryLabel, subLabel, questions, history);
 
       addToHistory(category, sub, harder.map((q) => q.text));
-      const withChoices = await generateChoicesForQuestions(harder);
+      setLoadingChoices(true);
+      const withChoices = await generateChoicesForQuestions(harder, category);
+      setLoadingChoices(false);
       console.log(`✅ Questions difficiles générées: ${withChoices.length}`);
 
       setQuestions(withChoices);
@@ -379,15 +386,16 @@ export default function Session() {
   // ─── RENDER STATES ─────────────────────────────────────────────────
 
   if (loading) {
+    const loadMsg = loadingChoices
+      ? '⚡ Préparation des choix...'
+      : loadingFromAPI
+      ? '🧠 L\'IA prépare vos questions personnalisées...'
+      : '📚 Chargement de vos questions...';
     return (
       <div className="min-h-dvh bg-bg flex flex-col items-center justify-center px-8">
-        <div className="text-5xl mb-6 animate-pulse">🧠</div>
-        <p className="text-lg font-semibold text-primary text-center">
-          {loadingFromAPI
-            ? '🧠 L\'IA prépare vos questions personnalisées...'
-            : '📚 Chargement de vos questions...'}
-        </p>
-        {loadingFromAPI && (
+        <div className="text-5xl mb-6 animate-pulse">{loadingChoices ? '⚡' : '🧠'}</div>
+        <p className="text-lg font-semibold text-primary text-center">{loadMsg}</p>
+        {(loadingFromAPI || loadingChoices) && (
           <p className="text-sm text-text3 mt-2 animate-pulse">quelques secondes...</p>
         )}
       </div>

@@ -1,5 +1,26 @@
 import { getCachedQuestions, saveToCache, getPrefetched } from '../lib/questionsCache';
 
+// ─── localStorage cache for MCQ choices ──────────────────────────────
+const CHOICES_CACHE_KEY = 'memorix-choices-cache';
+
+function getLocalChoices(questionText) {
+  try {
+    const cache = JSON.parse(localStorage.getItem(CHOICES_CACHE_KEY) || '{}');
+    return cache[questionText] || null;
+  } catch { return null; }
+}
+
+function saveLocalChoices(questionText, choices) {
+  try {
+    const cache = JSON.parse(localStorage.getItem(CHOICES_CACHE_KEY) || '{}');
+    cache[questionText] = choices;
+    // Keep cache under ~200 entries
+    const keys = Object.keys(cache);
+    if (keys.length > 200) delete cache[keys[0]];
+    localStorage.setItem(CHOICES_CACHE_KEY, JSON.stringify(cache));
+  } catch {}
+}
+
 const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:3001';
 
 async function callClaude(system, userMessage) {
@@ -178,20 +199,38 @@ function filtrerChoixSimilaires(wrongs, correctAnswer) {
   return wrongs.filter((w) => !sontTropSimilaires(w, correctAnswer));
 }
 
-// Re-generate wrong answers for a single question when too many are similar
-async function regenererMauvaisesReponses(question) {
-  console.log(`⚠️ Régénération des mauvaises réponses pour "${question.text.slice(0, 40)}..."`);
-  const user = `Pour la question : "${question.text}"
-La bonne réponse est : "${question.answer}"
-Génère 3 mauvaises réponses qui sont des concepts COMPLÈTEMENT DIFFÉRENTS de "${question.answer}" — jamais des variantes orthographiques ou translittérations.
-Réponds avec ce JSON uniquement : { "mauvaises": ["réponse 1", "réponse 2", "réponse 3"] }`;
+// Generate choices for a single question via the dedicated endpoint
+async function generateSingleQuestionChoices(question, categorie = '') {
+  // Check localStorage first
+  const cached = getLocalChoices(question.text);
+  if (cached && cached.length >= 4) {
+    console.log(`📦 Choix trouvés en cache local pour "${question.text.slice(0, 30)}..."`);
+    return cached;
+  }
+
+  console.log(`⚡ Génération des choix pour "${question.text.slice(0, 40)}..."`);
   try {
-    const data = await callClaude(SYSTEM_QUESTIONS, user);
-    const wrongs = filtrerChoixSimilaires(data.mauvaises || [], question.answer);
-    return [question.answer, ...wrongs.slice(0, 3)];
-  } catch {
+    const res = await fetch(`${API_BASE}/api/generate-choices`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ question: question.text, reponse_correcte: question.answer, categorie }),
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    const wrongs = filtrerChoixSimilaires(data.mauvaises_reponses || [], question.answer);
+    const choices = ensureCorrectAnswerInChoices([question.answer, ...wrongs.slice(0, 3)], question.answer);
+    saveLocalChoices(question.text, choices);
+    return choices;
+  } catch (err) {
+    console.warn('generateSingleQuestionChoices failed:', err.message);
     return [question.answer];
   }
+}
+
+// Re-generate wrong answers for a single question when too many are similar
+async function regenererMauvaisesReponses(question, categorie = '') {
+  console.log(`⚠️ Régénération des mauvaises réponses pour "${question.text.slice(0, 40)}..."`);
+  return generateSingleQuestionChoices(question, categorie);
 }
 
 // ─── 2. Evaluate Answer (MCQ — instant, no API call) ─────────────────
@@ -210,14 +249,22 @@ export function evaluateAnswer(correctAnswer, userAnswer) {
 
 // ─── 2b. Generate MCQ choices for questions without them ──────────────
 
-export async function generateChoicesForQuestions(questions) {
-  const needChoices = questions.filter((q) => !q.choices || q.choices.length < 4);
+export async function generateChoicesForQuestions(questions, categorie = '') {
+  // First pass: fill from localStorage cache where possible
+  const withLocalCache = questions.map((q) => {
+    if (q.choices && q.choices.length >= 4) return q;
+    const cached = getLocalChoices(q.text);
+    if (cached && cached.length >= 4) return { ...q, choices: cached };
+    return q;
+  });
+
+  const needChoices = withLocalCache.filter((q) => !q.choices || q.choices.length < 4);
   if (needChoices.length === 0) {
-    // Still validate existing choices for similarity
-    return Promise.all(questions.map(async (q) => {
+    // Validate existing choices for similarity
+    return Promise.all(withLocalCache.map(async (q) => {
       const valid = filtrerChoixSimilaires(q.choices.filter(c => c !== q.answer), q.answer);
       if (valid.length >= 3) return { ...q, choices: ensureCorrectAnswerInChoices(q.choices, q.answer) };
-      const rebuilt = await regenererMauvaisesReponses(q);
+      const rebuilt = await regenererMauvaisesReponses(q, categorie);
       return { ...q, choices: ensureCorrectAnswerInChoices(rebuilt, q.answer) };
     }));
   }
@@ -247,25 +294,28 @@ Réponds avec ce JSON exactement :
     });
 
     let needIdx = 0;
-    const results = await Promise.all(questions.map(async (q) => {
+    const results = await Promise.all(withLocalCache.map(async (q) => {
       if (!q.choices || q.choices.length < 4) {
         const raw = choicesByIdx[needIdx++] || [];
         const valid = filtrerChoixSimilaires(raw, q.answer);
-        let wrongs = valid.slice(0, 3);
-        // Not enough valid wrongs — regenerate for this question
-        if (wrongs.length < 3) {
-          const rebuilt = await regenererMauvaisesReponses(q);
-          return { ...q, choices: ensureCorrectAnswerInChoices(rebuilt, q.answer) };
+        let choices;
+        if (valid.length < 3) {
+          // Not enough valid wrongs — use dedicated endpoint
+          choices = await regenererMauvaisesReponses(q, categorie);
+        } else {
+          choices = ensureCorrectAnswerInChoices([q.answer, ...valid.slice(0, 3)], q.answer);
         }
-        return { ...q, choices: ensureCorrectAnswerInChoices([q.answer, ...wrongs], q.answer) };
+        saveLocalChoices(q.text, choices);
+        return { ...q, choices };
       }
-      // Validate existing choices too
+      // Validate existing choices for similarity
       const existingWrongs = filtrerChoixSimilaires(q.choices.filter(c => c !== q.answer), q.answer);
       if (existingWrongs.length >= 3) {
         return { ...q, choices: ensureCorrectAnswerInChoices(q.choices, q.answer) };
       }
-      const rebuilt = await regenererMauvaisesReponses(q);
-      return { ...q, choices: ensureCorrectAnswerInChoices(rebuilt, q.answer) };
+      const choices = await regenererMauvaisesReponses(q, categorie);
+      saveLocalChoices(q.text, choices);
+      return { ...q, choices };
     }));
 
     return results;
