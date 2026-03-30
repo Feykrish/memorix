@@ -5,15 +5,12 @@ import { addToReview, getReviewsDueToday, removeFromReview } from '../data/revie
 import { addJournalEntry } from '../data/journalStore';
 import { findSessionByCategorySub, markSessionCompleted, saveDailyErrors } from '../data/sessionStore';
 import { getAskedQuestions, addToHistory, getPendingCount } from '../data/questionHistory';
-import { generateQuestions, evaluateAnswer, generateHarderQuestions, generateFreeLearnQuestions } from '../api/claude';
+import { generateQuestions, evaluateAnswer, generateHarderQuestions, generateFreeLearnQuestions, generateChoicesForQuestions } from '../api/claude';
 import { syncSession } from '../lib/supabaseSync';
 import HomeButton from '../components/HomeButton';
 import BackButton from '../components/BackButton';
 import ThemeToggle from '../components/ThemeToggle';
 import ReportModal from '../components/ReportModal';
-
-// Both thresholds are now dynamic based on the user's chosen goal
-// MAX_PENDING = goal × 3, LEARN_GOAL = goal (calculated per session below)
 
 function formatTime(seconds) {
   const m = Math.floor(seconds / 60);
@@ -25,42 +22,36 @@ export default function Session() {
   const { t, lang } = useLang();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
-  const textareaRef = useRef(null);
-  const hasStarted = useRef(false); // Prevent double-start in StrictMode
+  const hasStarted = useRef(false);
 
   const category = searchParams.get('category') || '';
   const sub = decodeURIComponent(searchParams.get('sub') || '');
   const questionCount = parseInt(searchParams.get('count') || '5', 10);
   const difficulty = searchParams.get('difficulty') || 'auto';
-  // FreeLearn params (only set when category=freelearn)
   const flTopic  = decodeURIComponent(searchParams.get('topic')  || sub);
   const flLevel  = decodeURIComponent(searchParams.get('level')  || '');
   const flAspect = decodeURIComponent(searchParams.get('aspect') || '');
   const isFreeLearn = category === 'freelearn';
 
-  // Dynamic thresholds based on chosen goal
-  const LEARN_GOAL = questionCount;         // target wrong answers = learning goal
-  const MAX_PENDING = questionCount * 3;    // max pending = goal × 3
+  const LEARN_GOAL = questionCount;
+  const MAX_PENDING = questionCount * 3;
 
-  // Phase: 'loading' → 'review' → 'new' → 'harder' → 'done'
   const [phase, setPhase] = useState('loading');
   const [questions, setQuestions] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [evaluating, setEvaluating] = useState(false);
   const [apiError, setApiError] = useState(null);
   const [currentIndex, setCurrentIndex] = useState(0);
-  const [answer, setAnswer] = useState('');
+  const [selectedChoice, setSelectedChoice] = useState('');
+  const [shuffledChoices, setShuffledChoices] = useState([]);
   const [showResult, setShowResult] = useState(false);
   const [isCorrect, setIsCorrect] = useState(false);
   const [evalData, setEvalData] = useState(null);
-  const [showHint, setShowHint] = useState(false);
-  const [emptyError, setEmptyError] = useState(false);
   const [timer, setTimer] = useState(0);
   const [allResults, setAllResults] = useState([]);
   const [pendingCount, setPendingCount] = useState(0);
-  const [newWrongCount, setNewWrongCount] = useState(0); // Only counts wrong on NEW questions
-  const [loadingFromAPI, setLoadingFromAPI] = useState(false); // true = appel API en cours
-  const [reviewCount, setReviewCount] = useState(0); // How many review questions at start
+  const [newWrongCount, setNewWrongCount] = useState(0);
+  const [loadingFromAPI, setLoadingFromAPI] = useState(false);
+  const [reviewCount, setReviewCount] = useState(0);
   const [showPerfectMessage, setShowPerfectMessage] = useState(false);
   const [showMaxPending, setShowMaxPending] = useState(false);
 
@@ -75,13 +66,24 @@ export default function Session() {
     return sub;
   })();
 
+  // Shuffle choices when question changes
+  useEffect(() => {
+    if (question?.choices?.length) {
+      setShuffledChoices([...question.choices].sort(() => Math.random() - 0.5));
+    } else {
+      setShuffledChoices([]);
+    }
+    setSelectedChoice('');
+    setShowResult(false);
+    setEvalData(null);
+  }, [question?.id]);
+
   // Timer
   useEffect(() => {
     const interval = setInterval(() => setTimer((prev) => prev + 1), 1000);
     return () => clearInterval(interval);
   }, []);
 
-  // Load session on mount — guard against StrictMode double-call
   useEffect(() => {
     if (hasStarted.current) return;
     hasStarted.current = true;
@@ -93,7 +95,7 @@ export default function Session() {
   async function startSession() {
     setLoading(true);
     setApiError(null);
-    setAnswer('');
+    setSelectedChoice('');
     setShowResult(false);
     setEvalData(null);
 
@@ -102,7 +104,6 @@ export default function Session() {
     console.log(`\n═══ SESSION START: ${category} · ${sub} ═══`);
     console.log(`📅 Questions en attente: ${pending}`);
 
-    // STEP 1: Load review questions
     const reviewsDue = getReviewsDueToday();
     const key = `${category}::${sub}`;
     const reviewItems = reviewsDue[key] || [];
@@ -117,12 +118,12 @@ export default function Session() {
         anecdote: r.anecdote || '',
         hint: r.hint || '',
         keywords: r.keywords || [],
+        choices: r.choices || [],
         isReview: true,
       }));
-      setQuestions(reviewQuestions);
+      const withChoices = await generateChoicesForQuestions(reviewQuestions);
+      setQuestions(withChoices);
       setCurrentIndex(0);
-      setAnswer('');
-      setShowResult(false);
       setPhase('review');
       setLoading(false);
       return;
@@ -142,10 +143,9 @@ export default function Session() {
 
     console.log(`🆕 Génération de nouvelles questions (${currentPending} en attente < ${MAX_PENDING})`);
     setLoading(true);
-    setLoadingFromAPI(false); // réinitialiser — sera mis à true si l'API est appelée
+    setLoadingFromAPI(false);
     setApiError(null);
 
-    // Basculer le loader "API" après 800ms si toujours en chargement (= cache absent)
     const apiTimer = setTimeout(() => setLoadingFromAPI(true), 800);
 
     try {
@@ -158,12 +158,14 @@ export default function Session() {
 
       addToHistory(category, sub, newQuestions.map((q) => q.text));
 
-      console.log(`✅ Questions générées: ${newQuestions.length}`);
-      newQuestions.forEach((q, i) => console.log(`   ${i + 1}. ${q.text.slice(0, 60)}...`));
+      const withChoices = await generateChoicesForQuestions(newQuestions);
 
-      setQuestions(newQuestions);
+      console.log(`✅ Questions générées: ${withChoices.length}`);
+      withChoices.forEach((q, i) => console.log(`   ${i + 1}. ${q.text.slice(0, 60)}...`));
+
+      setQuestions(withChoices);
       setCurrentIndex(0);
-      setAnswer('');
+      setSelectedChoice('');
       setShowResult(false);
       setEvalData(null);
       setPhase('new');
@@ -188,11 +190,12 @@ export default function Session() {
         : await generateHarderQuestions(categoryLabel, subLabel, questions, history);
 
       addToHistory(category, sub, harder.map((q) => q.text));
-      console.log(`✅ Questions difficiles générées: ${harder.length}`);
+      const withChoices = await generateChoicesForQuestions(harder);
+      console.log(`✅ Questions difficiles générées: ${withChoices.length}`);
 
-      setQuestions(harder);
+      setQuestions(withChoices);
       setCurrentIndex(0);
-      setAnswer('');
+      setSelectedChoice('');
       setShowResult(false);
       setEvalData(null);
       setPhase('harder');
@@ -206,22 +209,12 @@ export default function Session() {
 
   // ─── ANSWER HANDLING ───────────────────────────────────────────────
 
-  const handleValidate = useCallback(async () => {
-    // BUG FIX #3: Triple-check answer is not empty
-    const trimmed = answer.trim();
-    if (!trimmed) {
-      setEmptyError(true);
-      setTimeout(() => setEmptyError(false), 2000);
-      return;
-    }
+  const handleValidate = useCallback(() => {
+    if (!selectedChoice) return;
     if (!question) return;
-    if (showResult) return; // Already showing result
-    if (evaluating) return; // Already evaluating
+    if (showResult) return;
 
-    setEvaluating(true);
-    const evaluation = evaluateAnswer(
-      question.text, question.answer, question.keywords || [], trimmed
-    );
+    const evaluation = evaluateAnswer(question.answer, selectedChoice);
     const correct = evaluation.isCorrect;
 
     console.log(`📝 Réponse évaluée: ${correct ? '✅ correct' : '❌ incorrect'} — "${question.text.slice(0, 40)}..."`);
@@ -233,7 +226,7 @@ export default function Session() {
     const result = {
       questionId: question.id,
       correct,
-      userAnswer: trimmed,
+      userAnswer: selectedChoice,
       text: question.text,
       answer: question.answer,
       anecdote: question.anecdote,
@@ -241,7 +234,6 @@ export default function Session() {
     };
     setAllResults((prev) => [...prev, result]);
 
-    // Handle review question
     if (question.isReview) {
       if (correct) {
         removeFromReview(category, sub, [question.text]);
@@ -252,14 +244,15 @@ export default function Session() {
         addToReview(category, sub, [{
           text: question.text, answer: question.answer,
           anecdote: question.anecdote, hint: question.hint, keywords: question.keywords,
+          choices: question.choices,
         }]);
         console.log(`   📅 Ratée à nouveau — repart pour demain`);
       }
     } else if (!correct) {
-      // BUG FIX #2: Count wrong only on NEW questions
       addToReview(category, sub, [{
         text: question.text, answer: question.answer,
         anecdote: question.anecdote, hint: question.hint, keywords: question.keywords,
+        choices: question.choices,
       }]);
       setPendingCount((p) => p + 1);
       setNewWrongCount((w) => {
@@ -269,7 +262,6 @@ export default function Session() {
       });
     }
 
-    // Sync Supabase
     const sess = findSessionByCategorySub(category, sub);
     if (sess) {
       syncSession({
@@ -280,23 +272,17 @@ export default function Session() {
         knowledgeCount: sess.knowledgeCount || 0,
       }).catch(() => {});
     }
-
-    setEvaluating(false);
-  }, [answer, question, showResult, evaluating, category, sub, difficulty, questionCount]);
+  }, [selectedChoice, question, showResult, category, sub, difficulty, questionCount]);
 
   const handleNext = useCallback(async () => {
     if (currentIndex < questions.length - 1) {
       setCurrentIndex((i) => i + 1);
-      setAnswer('');
+      setSelectedChoice('');
       setShowResult(false);
-      setShowHint(false);
-      setEmptyError(false);
       setEvalData(null);
-      setTimeout(() => textareaRef.current?.focus(), 50);
       return;
     }
 
-    // Batch complete
     if (phase === 'review') {
       console.log(`\n─── Review phase complete ───`);
       const updatedPending = getPendingCount(category, sub);
@@ -307,16 +293,13 @@ export default function Session() {
     }
 
     if (phase === 'new' || phase === 'harder') {
-      // BUG FIX #2: Check if we need more questions to reach LEARN_GOAL
       console.log(`📊 Bilan: ${newWrongCount} mauvaises réponses sur nouvelles (minimum: ${LEARN_GOAL})`);
 
       if (newWrongCount < LEARN_GOAL) {
-        // Not enough wrong answers — generate harder questions
         await loadHarderQuestions();
         return;
       }
 
-      // Enough wrong answers — session done
       finishSession();
     }
   }, [currentIndex, questions.length, phase, newWrongCount, category, sub]);
@@ -324,7 +307,6 @@ export default function Session() {
   function finishSession() {
     console.log(`\n═══ SESSION COMPLETE ═══`);
     console.log(`   Total: ${allResults.length} | Correct: ${allResults.filter((r) => r.correct).length} | Wrong: ${allResults.filter((r) => !r.correct).length}`);
-    console.log(`   Wrong on new: ${newWrongCount} | Pending: ${getPendingCount(category, sub)}`);
 
     const state = {
       questions: allResults.map((r) => ({
@@ -417,7 +399,6 @@ export default function Session() {
 
   if (!question) return null;
 
-  // Session summary text
   const summaryText = (() => {
     if (reviewCount > 0 && phase === 'review') {
       return (s.sessionSummary || '').replace('{review}', reviewCount).replace('{new}', questionCount);
@@ -447,7 +428,7 @@ export default function Session() {
         {/* Session summary */}
         <p className="text-xs text-text3 mb-2">{summaryText}</p>
 
-        {/* Goal progress bar — tracks wrong answers (= learned things) */}
+        {/* Progress bar */}
         {(phase === 'new' || phase === 'harder') ? (
           <div className="mb-5">
             <div className="flex justify-between items-center mb-1.5">
@@ -466,7 +447,6 @@ export default function Session() {
             </div>
           </div>
         ) : (
-          /* Review phase: show question dots */
           <div className="flex gap-2 mb-5">
             {questions.map((_, i) => (
               <div key={i} className={`h-1.5 flex-1 rounded-full transition-all ${
@@ -476,7 +456,7 @@ export default function Session() {
           </div>
         )}
 
-        {/* FIX #1: Question card with colored left border */}
+        {/* Question card */}
         <div className={`flex-1 flex flex-col rounded-xl p-4 border-l-4 ${
           question.isReview
             ? 'border-l-reminder bg-reminder/[0.03]'
@@ -502,52 +482,54 @@ export default function Session() {
             )}
           </div>
 
-          {/* FIX #1: Review hint */}
           {question.isReview && (
             <p className="text-xs text-reminder/70 mb-2 italic">{s.reviewHint}</p>
           )}
 
           <h2 className="text-xl font-bold text-text leading-relaxed mb-5">{question.text}</h2>
 
-          {!showResult ? (
-            <>
-              <textarea
-                ref={textareaRef}
-                value={answer}
-                onChange={(e) => { setAnswer(e.target.value); setEmptyError(false); }}
-                placeholder={s.placeholder}
-                rows={3}
-                className={`w-full p-4 rounded-xl border-2 text-base text-text resize-none outline-none transition-colors ${
-                  emptyError ? 'border-error bg-error/5' : 'border-border focus:border-primary/40 bg-bg2'
-                }`}
-              />
-              {emptyError && <p className="text-error text-sm font-medium mt-2">{s.emptyAnswer}</p>}
-              {!showHint ? (
-                <button onClick={() => setShowHint(true)} className="mt-3 text-sm text-text3 hover:text-text2 transition-colors cursor-pointer self-start">
-                  {s.hint}
+          {/* MCQ choices */}
+          <div className="flex flex-col gap-3">
+            {shuffledChoices.length > 0 ? shuffledChoices.map((choice) => {
+              let cls;
+              if (!showResult) {
+                cls = selectedChoice === choice
+                  ? 'bg-primary/10 border-primary text-primary font-semibold'
+                  : 'bg-card border-border text-text hover:border-primary/40 cursor-pointer';
+              } else {
+                if (choice === question.answer) {
+                  cls = 'bg-success/10 border-success text-success font-semibold';
+                } else if (choice === selectedChoice && !isCorrect) {
+                  cls = 'bg-error/10 border-error text-error';
+                } else {
+                  cls = 'bg-card border-border text-text3 opacity-50';
+                }
+              }
+              return (
+                <button
+                  key={choice}
+                  onClick={() => !showResult && setSelectedChoice(choice)}
+                  className={`w-full py-3 px-4 rounded-xl border-2 text-left text-sm transition-all ${cls}`}
+                >
+                  {showResult && choice === question.answer && '✅ '}
+                  {showResult && choice === selectedChoice && !isCorrect && '❌ '}
+                  {choice}
                 </button>
-              ) : (
-                <p className="mt-3 text-sm text-reminder/80 bg-reminder/5 px-3 py-2 rounded-lg">💡 {question.hint}</p>
-              )}
-            </>
-          ) : (
-            <div className="flex flex-col gap-3">
+              );
+            }) : (
+              <p className="text-sm text-text3 animate-pulse">Chargement des choix...</p>
+            )}
+          </div>
+
+          {/* Result feedback (shown below choices after validation) */}
+          {showResult && (
+            <div className="flex flex-col gap-3 mt-4">
               {isCorrect ? (
                 <>
-                  <div className="p-4 rounded-2xl bg-success/5 border-2 border-success/20">
-                    <div className="flex items-center gap-2 mb-2">
-                      <span className="text-lg">✅</span>
-                      <span className="font-bold text-success">{evalData?.result === 'partiel' ? s.partialAnswer : s.correct}</span>
-                    </div>
-                    {evalData?.message && <p className="text-sm text-text2 leading-relaxed mb-2">{evalData.message}</p>}
+                  <div className="p-4 rounded-xl bg-success/5 border border-success/20">
+                    <p className="text-xs font-semibold text-success/70 uppercase mb-1">{s.didYouKnow}</p>
                     <p className="text-sm text-text2 leading-relaxed">{question.anecdote}</p>
                   </div>
-                  {evalData?.result === 'partiel' && evalData?.missing && (
-                    <div className="p-3 rounded-xl bg-reminder/5 border border-reminder/20">
-                      <p className="text-xs font-semibold text-reminder/70 uppercase mb-1">{s.partialMessage}</p>
-                      <p className="text-sm text-text2">{evalData.missing}</p>
-                    </div>
-                  )}
                   {question.isReview && (
                     <div className="p-3 rounded-xl bg-success/10 text-success text-sm font-semibold text-center">
                       {s.mastered}
@@ -556,14 +538,6 @@ export default function Session() {
                 </>
               ) : (
                 <>
-                  <span className="self-start inline-block text-xs font-semibold px-3 py-1 rounded-full bg-error/10 text-error">
-                    {s.newKnowledgeBadge}
-                  </span>
-                  {evalData?.message && <p className="text-sm text-text2">{evalData.message}</p>}
-                  <div className="p-4 rounded-xl bg-success/5 border border-success/20">
-                    <p className="text-xs font-semibold text-success/70 uppercase mb-1">{s.theCorrectAnswer}</p>
-                    <p className="text-base font-bold text-text">{evalData?.correction || question.answer}</p>
-                  </div>
                   <div className="p-4 rounded-xl bg-reminder/5 border border-reminder/20">
                     <p className="text-xs font-semibold text-reminder/70 uppercase mb-1">{s.didYouKnow}</p>
                     <p className="text-sm text-text2 leading-relaxed">{question.anecdote}</p>
@@ -571,7 +545,6 @@ export default function Session() {
                   <div className="p-3 rounded-xl bg-primary/10 text-primary text-sm font-semibold text-center">
                     {s.comeBackTomorrow}
                   </div>
-                  {/* Signalement discret — visible uniquement sur l'écran de correction */}
                   <ReportModal
                     subject={`Erreur signalée — ${categoryLabel} · ${subLabel}`}
                     context={question?.text}
@@ -583,7 +556,7 @@ export default function Session() {
           )}
         </div>
 
-        {/* Motivational message for new/harder questions */}
+        {/* Motivational message */}
         {(phase === 'new' || phase === 'harder') && !question.isReview && showResult && !isCorrect && (() => {
           const msg = newWrongCount === 0 ? s.motivZero
             : newWrongCount === 1 ? s.motivOne
@@ -598,16 +571,14 @@ export default function Session() {
           {!showResult ? (
             <button
               onClick={handleValidate}
-              disabled={evaluating || !answer.trim()}
+              disabled={!selectedChoice}
               className={`w-full py-4 font-semibold text-lg rounded-2xl transition-colors flex items-center justify-center gap-2 ${
-                evaluating
-                  ? 'bg-primary/60 text-white/70 cursor-wait'
-                  : !answer.trim()
+                !selectedChoice
                   ? 'bg-border text-text3 cursor-not-allowed'
                   : 'bg-primary hover:bg-primary-dark text-white cursor-pointer active:scale-[0.98]'
               }`}
             >
-              {evaluating ? s.evaluating : <>{s.validate} <span className="text-white/70">→</span></>}
+              {s.validate} <span className="text-white/70">→</span>
             </button>
           ) : (
             <button onClick={handleNext} className="w-full py-4 bg-primary hover:bg-primary-dark text-white font-semibold text-lg rounded-2xl transition-colors cursor-pointer active:scale-[0.98] flex items-center justify-center gap-2">

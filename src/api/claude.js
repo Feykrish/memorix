@@ -101,19 +101,23 @@ Réponds avec ce JSON exactement :
       "id": 1,
       "question": "texte de la question",
       "reponse_correcte": "la réponse attendue",
+      "choix": ["la bonne réponse", "mauvaise réponse plausible 1", "mauvaise réponse plausible 2", "mauvaise réponse plausible 3"],
       "mots_cles": ["mot1", "mot2", "mot3"],
       "anecdote": "fait intéressant lié à la réponse (2-3 phrases)",
       "indice": "un indice court sans donner la réponse",
       "difficulte": "facile|moyen|difficile"
     }
   ]
-}`;
+}
+
+Les 3 mauvaises réponses doivent être plausibles et du même registre que la bonne réponse.`;
 
   const data = await callClaude(SYSTEM_QUESTIONS, user);
   const questions = (data.questions || []).map((q, i) => ({
     id: q.id || i + 1,
     text: q.question,
     answer: q.reponse_correcte,
+    choices: q.choix || [],
     keywords: q.mots_cles || [],
     anecdote: q.anecdote || '',
     hint: q.indice || '',
@@ -129,74 +133,60 @@ Réponds avec ce JSON exactement :
   return questions;
 }
 
-// ─── 2. Evaluate Answer (local, instant — no API call) ───────────────
+// ─── 2. Evaluate Answer (MCQ — instant, no API call) ─────────────────
 
-function normalize(str) {
-  return (str || '')
-    .toLowerCase()
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .trim();
+export function evaluateAnswer(correctAnswer, userAnswer) {
+  const correct = userAnswer === correctAnswer;
+  return {
+    result: correct ? 'correct' : 'incorrect',
+    score: correct ? 1 : 0,
+    isCorrect: correct,
+    message: correct ? 'Bonne réponse ! 🎉' : 'Pas tout à fait...',
+    correction: correctAnswer,
+    missing: null,
+  };
 }
 
-export function evaluateAnswer(question, correctAnswer, keywords, userAnswer) {
-  if (!userAnswer || userAnswer.trim() === '') {
-    return {
-      result: 'incorrect',
-      score: 0,
-      isCorrect: false,
-      message: "Vous n'avez pas répondu.",
-      correction: correctAnswer,
-      missing: 'Aucune réponse fournie',
-    };
-  }
+// ─── 2b. Generate MCQ choices for questions without them ──────────────
 
-  const userNorm = normalize(userAnswer);
-  const correctNorm = normalize(correctAnswer);
+export async function generateChoicesForQuestions(questions) {
+  const needChoices = questions.filter((q) => !q.choices || q.choices.length < 4);
+  if (needChoices.length === 0) return questions;
 
-  if (userNorm === correctNorm || correctNorm.includes(userNorm) || userNorm.includes(correctNorm)) {
-    return {
-      result: 'correct',
-      score: 1,
-      isCorrect: true,
-      message: 'Parfait ! Excellente réponse !',
-      correction: correctAnswer,
-      missing: null,
-    };
-  }
+  console.log(`🎯 Génération des choix QCM pour ${needChoices.length} questions`);
 
-  const kwNorms = (keywords || []).map(normalize).filter(Boolean);
-  const found = kwNorms.filter((kw) => userNorm.includes(kw));
-  const ratio = kwNorms.length > 0 ? found.length / kwNorms.length : 0;
+  const user = `Pour chaque question, génère 3 mauvaises réponses plausibles (même registre que la bonne réponse, pas absurdes).
 
-  if (ratio >= 0.6) {
-    return {
-      result: 'correct',
-      score: 1,
-      isCorrect: true,
-      message: 'Bonne réponse ! Vous avez les éléments essentiels.',
-      correction: correctAnswer,
-      missing: null,
-    };
-  } else if (ratio >= 0.3) {
-    const missing = kwNorms.filter((kw) => !userNorm.includes(kw)).join(', ');
-    return {
-      result: 'partiel',
-      score: 0,
-      isCorrect: false,
-      message: "Pas tout à fait — mais vous venez d'apprendre quelque chose !",
-      correction: correctAnswer,
-      missing: `Éléments manquants : ${missing}`,
-    };
-  } else {
-    return {
-      result: 'incorrect',
-      score: 0,
-      isCorrect: false,
-      message: "Pas tout à fait — mais vous venez d'apprendre quelque chose de nouveau !",
-      correction: correctAnswer,
-      missing: `Réponse attendue : ${correctAnswer}`,
-    };
+${needChoices.map((q, i) => `${i + 1}. Question : "${q.text}" | Bonne réponse : "${q.answer}"`).join('\n')}
+
+Réponds avec ce JSON exactement :
+{
+  "resultats": [
+    { "index": 1, "mauvaises": ["réponse fausse 1", "réponse fausse 2", "réponse fausse 3"] }
+  ]
+}`;
+
+  try {
+    const data = await callClaude(SYSTEM_QUESTIONS, user);
+    const resultats = data.resultats || [];
+
+    const choicesByIdx = {};
+    resultats.forEach((r) => {
+      const idx = (r.index || 1) - 1;
+      choicesByIdx[idx] = r.mauvaises || [];
+    });
+
+    let needIdx = 0;
+    return questions.map((q) => {
+      if (!q.choices || q.choices.length < 4) {
+        const wrongs = choicesByIdx[needIdx++] || [];
+        return { ...q, choices: [q.answer, ...wrongs.slice(0, 3)] };
+      }
+      return q;
+    });
+  } catch (err) {
+    console.warn('Failed to generate choices:', err.message);
+    return questions;
   }
 }
 
@@ -275,6 +265,7 @@ Réponds avec ce JSON exactement :
       "id": 1,
       "question": "texte de la question",
       "reponse_correcte": "la réponse attendue",
+      "choix": ["la bonne réponse", "mauvaise réponse plausible 1", "mauvaise réponse plausible 2", "mauvaise réponse plausible 3"],
       "mots_cles": ["mot1", "mot2", "mot3"],
       "anecdote": "fait intéressant lié à la réponse (2-3 phrases)",
       "indice": "un indice court sans donner la réponse",
@@ -288,6 +279,7 @@ Réponds avec ce JSON exactement :
     id: q.id || i + 1,
     text: q.question,
     answer: q.reponse_correcte,
+    choices: q.choix || [],
     keywords: q.mots_cles || [],
     anecdote: q.anecdote || '',
     hint: q.indice || '',
@@ -314,6 +306,7 @@ Réponds avec ce JSON exactement :
       "id": 1,
       "question": "texte de la question",
       "reponse_correcte": "la réponse attendue",
+      "choix": ["la bonne réponse", "mauvaise réponse plausible 1", "mauvaise réponse plausible 2", "mauvaise réponse plausible 3"],
       "mots_cles": ["mot1", "mot2", "mot3"],
       "anecdote": "fait intéressant lié à la réponse (2-3 phrases)",
       "indice": "un indice court sans donner la réponse",
@@ -327,6 +320,7 @@ Réponds avec ce JSON exactement :
     id: q.id || i + 1,
     text: q.question,
     answer: q.reponse_correcte,
+    choices: q.choix || [],
     keywords: q.mots_cles || [],
     anecdote: q.anecdote || '',
     hint: q.indice || '',
