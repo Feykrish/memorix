@@ -90,7 +90,7 @@ export default function Session() {
   const [showMaxPending, setShowMaxPending] = useState(false);
   const [showLevelUpAnim, setShowLevelUpAnim] = useState(null); // { newNiveau, label }
   const [pendingLevelUp, setPendingLevelUp] = useState(null);
-  const [progression, setProgression] = useState(() => isFreeLearn ? null : getProgression(category));
+  const [progression, setProgression] = useState(() => isFreeLearn ? null : getProgression(category, sub));
 
   const JE_NE_SAIS_PAS = '🤷 Je ne sais pas';
 
@@ -307,8 +307,8 @@ export default function Session() {
 
     // Progression: track correct answers per category (non-review only)
     if (correct && !question.isReview) {
-      const { levelUp, newNiveau } = addCorrectAnswers(category, 1);
-      const newProgression = getProgression(category);
+      const { levelUp, newNiveau } = addCorrectAnswers(category, 1, sub);
+      const newProgression = getProgression(category, sub);
       setProgression(newProgression);
       if (levelUp) {
         setPendingLevelUp({ newNiveau, label: getNiveauLabel(newNiveau) });
@@ -598,11 +598,6 @@ export default function Session() {
                 </span>
               );
             })()}
-            {phase === 'harder' && (
-              <span className="inline-block text-xs font-semibold px-3 py-1 rounded-full bg-error/10 text-error">
-                🔥 Expert
-              </span>
-            )}
           </div>
           {/* Progression text */}
           {!isFreeLearn && progression && (

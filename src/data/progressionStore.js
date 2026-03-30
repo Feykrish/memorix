@@ -40,24 +40,27 @@ export function getProgressionText(total, niveau) {
 }
 
 /**
- * Returns { total, niveau } for a category.
+ * Returns { total, niveau } for a category+sub pair.
+ * Key format: "category::sub" for per-subcategory tracking.
  */
-export function getProgression(category) {
+export function getProgression(category, sub = '') {
   const store = getStore();
-  const total = store[category] || 0;
+  const key   = sub ? `${category}::${sub}` : category;
+  const total = store[key] || 0;
   return { total, niveau: calculerNiveau(total) };
 }
 
 /**
- * Add correct answers for a category.
+ * Add correct answers for a category+sub pair.
  * Returns { prevNiveau, newNiveau, levelUp } so the caller can show a message.
  */
-export function addCorrectAnswers(category, count) {
+export function addCorrectAnswers(category, count, sub = '') {
   const store = getStore();
-  const prev = store[category] || 0;
+  const key   = sub ? `${category}::${sub}` : category;
+  const prev  = store[key] || 0;
   const prevNiveau = calculerNiveau(prev);
-  store[category] = prev + count;
-  const newNiveau = calculerNiveau(store[category]);
+  store[key]       = prev + count;
+  const newNiveau  = calculerNiveau(store[key]);
   saveStore(store);
   return { prevNiveau, newNiveau, levelUp: newNiveau !== prevNiveau };
 }
