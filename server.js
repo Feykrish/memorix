@@ -120,6 +120,70 @@ app.post('/api/claude', async (req, res) => {
   }
 });
 
+// ─── POST /api/translate — batch question translator ─────────────────
+app.post('/api/translate', async (req, res) => {
+  console.log('\n📨 POST /api/translate');
+  const { questions, langueCible } = req.body;
+
+  if (!questions?.length || !langueCible) {
+    return res.status(400).json({ error: 'Missing questions or langueCible' });
+  }
+  if (!API_KEY) return res.status(500).json({ error: 'No API key' });
+
+  const LANG_NAMES = { en: 'anglais', es: 'espagnol', de: 'allemand', tr: 'turc' };
+  const nomLangue = LANG_NAMES[langueCible] || langueCible;
+
+  const prompt = `Traduis ces ${questions.length} question(s) de quiz du français en ${nomLangue}.
+
+${questions.map((q, i) => `--- Q${i + 1} ---
+Question : "${q.text}"
+Bonne réponse : "${q.answer}"
+Choix : ${JSON.stringify(q.choices || [])}
+Anecdote : "${q.anecdote || ''}"
+Indice : "${q.hint || ''}"`).join('\n\n')}
+
+RÈGLES DE TRADUCTION :
+- Traduis naturellement, pas mot à mot
+- Garde les noms propres, dates et chiffres IDENTIQUES (ex: "Muhammad", "1453", "La Mecque")
+- Les mauvaises réponses doivent rester du même TYPE que la bonne réponse
+- Conserve l'ordre des choix tel quel
+
+Réponds UNIQUEMENT avec ce JSON valide (sans markdown) :
+{
+  "translated": [
+    {
+      "text": "question traduite",
+      "answer": "bonne réponse traduite",
+      "choices": ["choix1 traduit", "choix2 traduit", "choix3 traduit", "choix4 traduit"],
+      "anecdote": "anecdote traduite",
+      "hint": "indice traduit"
+    }
+  ]
+}`;
+
+  try {
+    const response = await fetch(API_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-api-key': API_KEY, 'anthropic-version': '2023-06-01' },
+      body: JSON.stringify({ model: MODEL, max_tokens: 1500, messages: [{ role: 'user', content: prompt }] }),
+    });
+    if (!response.ok) {
+      const errText = await response.text().catch(() => '');
+      return res.status(response.status).json({ error: `Claude API error ${response.status}`, details: errText });
+    }
+    const data = await response.json();
+    const text = data.content?.[0]?.text || '';
+    const jsonStr = text.replace(/```json|```/g, '').trim();
+    const match = jsonStr.match(/\{[\s\S]*\}/);
+    const result = JSON.parse(match?.[0] || jsonStr);
+    console.log(`   ✅ Translated ${result.translated?.length || 0} questions → ${nomLangue}`);
+    res.json(result);
+  } catch (err) {
+    console.error('   ❌ translate error:', err.message);
+    res.status(500).json({ error: 'Translation failed', details: err.message });
+  }
+});
+
 // ─── POST /api/generate-choices — dedicated MCQ choice generator ─────
 app.post('/api/generate-choices', async (req, res) => {
   console.log('\n📨 POST /api/generate-choices');
