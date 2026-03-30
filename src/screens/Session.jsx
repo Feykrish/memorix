@@ -66,10 +66,15 @@ export default function Session() {
     return sub;
   })();
 
-  // Shuffle choices when question changes
+  // Shuffle choices when question changes — always ensure correct answer is present
   useEffect(() => {
     if (question?.choices?.length) {
-      setShuffledChoices([...question.choices].sort(() => Math.random() - 0.5));
+      let choices = [...question.choices];
+      // Client-side safety: if correct answer missing, inject it
+      if (question.answer && !choices.includes(question.answer)) {
+        choices = [question.answer, ...choices.slice(0, 3)];
+      }
+      setShuffledChoices(choices.sort(() => Math.random() - 0.5));
     } else {
       setShuffledChoices([]);
     }

@@ -101,7 +101,7 @@ Réponds avec ce JSON exactement :
       "id": 1,
       "question": "texte de la question",
       "reponse_correcte": "la réponse attendue",
-      "choix": ["la bonne réponse", "mauvaise réponse plausible 1", "mauvaise réponse plausible 2", "mauvaise réponse plausible 3"],
+      "choix": ["reponse_correcte EXACTE ici", "mauvaise réponse plausible 1", "mauvaise réponse plausible 2", "mauvaise réponse plausible 3"],
       "mots_cles": ["mot1", "mot2", "mot3"],
       "anecdote": "fait intéressant lié à la réponse (2-3 phrases)",
       "indice": "un indice court sans donner la réponse",
@@ -110,14 +110,17 @@ Réponds avec ce JSON exactement :
   ]
 }
 
-Les 3 mauvaises réponses doivent être plausibles et du même registre que la bonne réponse.`;
+RÈGLE ABSOLUE pour "choix" : le tableau DOIT contenir EXACTEMENT 4 éléments.
+Le PREMIER élément de "choix" DOIT être identique à "reponse_correcte".
+Les 3 autres sont des mauvaises réponses plausibles du même registre.
+Ne génère JAMAIS 4 mauvaises réponses. La bonne réponse doit toujours être présente.`;
 
   const data = await callClaude(SYSTEM_QUESTIONS, user);
   const questions = (data.questions || []).map((q, i) => ({
     id: q.id || i + 1,
     text: q.question,
     answer: q.reponse_correcte,
-    choices: q.choix || [],
+    choices: ensureCorrectAnswerInChoices(q.choix || [], q.reponse_correcte),
     keywords: q.mots_cles || [],
     anecdote: q.anecdote || '',
     hint: q.indice || '',
@@ -131,6 +134,15 @@ Les 3 mauvaises réponses doivent être plausibles et du même registre que la b
   saveToCache(questions, category, subCategory, difficulty, langue).catch(() => {});
 
   return questions;
+}
+
+// ─── Helper: ensure correct answer is always in choices ──────────────
+
+function ensureCorrectAnswerInChoices(choices, correctAnswer) {
+  if (!correctAnswer) return choices;
+  if (choices.includes(correctAnswer)) return choices;
+  // Correct answer missing — replace last element with it
+  return [correctAnswer, ...(choices.slice(0, 3))];
 }
 
 // ─── 2. Evaluate Answer (MCQ — instant, no API call) ─────────────────
@@ -180,9 +192,10 @@ Réponds avec ce JSON exactement :
     return questions.map((q) => {
       if (!q.choices || q.choices.length < 4) {
         const wrongs = choicesByIdx[needIdx++] || [];
-        return { ...q, choices: [q.answer, ...wrongs.slice(0, 3)] };
+        const built = [q.answer, ...wrongs.slice(0, 3)];
+        return { ...q, choices: ensureCorrectAnswerInChoices(built, q.answer) };
       }
-      return q;
+      return { ...q, choices: ensureCorrectAnswerInChoices(q.choices, q.answer) };
     });
   } catch (err) {
     console.warn('Failed to generate choices:', err.message);
@@ -265,21 +278,23 @@ Réponds avec ce JSON exactement :
       "id": 1,
       "question": "texte de la question",
       "reponse_correcte": "la réponse attendue",
-      "choix": ["la bonne réponse", "mauvaise réponse plausible 1", "mauvaise réponse plausible 2", "mauvaise réponse plausible 3"],
+      "choix": ["reponse_correcte EXACTE ici", "mauvaise réponse plausible 1", "mauvaise réponse plausible 2", "mauvaise réponse plausible 3"],
       "mots_cles": ["mot1", "mot2", "mot3"],
       "anecdote": "fait intéressant lié à la réponse (2-3 phrases)",
       "indice": "un indice court sans donner la réponse",
       "difficulte": "facile|moyen|difficile"
     }
   ]
-}`;
+}
+
+RÈGLE ABSOLUE pour "choix" : le PREMIER élément DOIT être identique à "reponse_correcte". Ne génère JAMAIS 4 mauvaises réponses.`;
 
   const data = await callClaude(system, user);
   return (data.questions || []).map((q, i) => ({
     id: q.id || i + 1,
     text: q.question,
     answer: q.reponse_correcte,
-    choices: q.choix || [],
+    choices: ensureCorrectAnswerInChoices(q.choix || [], q.reponse_correcte),
     keywords: q.mots_cles || [],
     anecdote: q.anecdote || '',
     hint: q.indice || '',
@@ -306,21 +321,23 @@ Réponds avec ce JSON exactement :
       "id": 1,
       "question": "texte de la question",
       "reponse_correcte": "la réponse attendue",
-      "choix": ["la bonne réponse", "mauvaise réponse plausible 1", "mauvaise réponse plausible 2", "mauvaise réponse plausible 3"],
+      "choix": ["reponse_correcte EXACTE ici", "mauvaise réponse plausible 1", "mauvaise réponse plausible 2", "mauvaise réponse plausible 3"],
       "mots_cles": ["mot1", "mot2", "mot3"],
       "anecdote": "fait intéressant lié à la réponse (2-3 phrases)",
       "indice": "un indice court sans donner la réponse",
       "difficulte": "difficile"
     }
   ]
-}`;
+}
+
+RÈGLE ABSOLUE pour "choix" : le PREMIER élément DOIT être identique à "reponse_correcte". Ne génère JAMAIS 4 mauvaises réponses.`;
 
   const data = await callClaude(SYSTEM_QUESTIONS, user);
   return (data.questions || []).map((q, i) => ({
     id: q.id || i + 1,
     text: q.question,
     answer: q.reponse_correcte,
-    choices: q.choix || [],
+    choices: ensureCorrectAnswerInChoices(q.choix || [], q.reponse_correcte),
     keywords: q.mots_cles || [],
     anecdote: q.anecdote || '',
     hint: q.indice || '',
