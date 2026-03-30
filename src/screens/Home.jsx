@@ -10,7 +10,7 @@ import ThemeToggle from '../components/ThemeToggle';
 import ContactModal from '../components/ContactModal';
 
 const localeMap = { fr: 'fr-FR', en: 'en-US', es: 'es-ES', de: 'de-DE', tr: 'tr-TR' };
-const isDev = typeof window !== 'undefined' && window.location.hostname === 'localhost';
+const isDev = true; // visible pour tests — à passer false avant lancement public
 
 function formatDate(lang) {
   const offset = getSimDayOffset();
