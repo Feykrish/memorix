@@ -6,7 +6,6 @@ import { deleteAllUserData } from '../lib/supabaseSync';
 import HomeButton from '../components/HomeButton';
 import BackButton from '../components/BackButton';
 import ThemeToggle from '../components/ThemeToggle';
-import LangSelector from '../components/LangSelector';
 
 const EMAIL_CONTACT = 'contact@memorix.app';
 
@@ -70,8 +69,17 @@ export default function Settings() {
 
         {/* Language */}
         <div className="rounded-2xl bg-card border border-border p-5">
-          <p className="text-sm font-bold text-text mb-3">{s.language}</p>
-          <LangSelector />
+          <p className="text-sm font-bold text-text mb-1">{s.language}</p>
+          <p className="text-xs text-text3 mb-4">{s.changeLangDesc}</p>
+          <button
+            onClick={() => navigate('/language-picker?mode=settings')}
+            className="w-full flex items-center gap-3 p-3.5 rounded-xl border-2 border-border cursor-pointer hover:border-primary/40 hover:bg-primary/[0.02] transition-all"
+          >
+            <span className="text-xl">🌍</span>
+            <div className="text-left">
+              <p className="text-sm font-semibold text-text">{s.changeLang}</p>
+            </div>
+          </button>
         </div>
 
         {/* Notifications */}

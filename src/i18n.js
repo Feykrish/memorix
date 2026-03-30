@@ -231,6 +231,8 @@ export const translations = {
     settings: {
       title: 'Paramètres',
       language: 'Langue de l\'interface',
+      changeLang: 'Changer de langue',
+      changeLangDesc: 'Choisissez la langue d\'affichage de l\'interface',
       dangerZone: 'Zone de danger',
       dangerZoneDesc: 'Actions irréversibles sur votre compte.',
       resetButton: 'Recommencer depuis zéro',
@@ -538,6 +540,8 @@ export const translations = {
     settings: {
       title: 'Settings',
       language: 'Interface language',
+      changeLang: 'Change language',
+      changeLangDesc: 'Choose the display language of the interface',
       dangerZone: 'Danger zone',
       dangerZoneDesc: 'Irreversible actions on your account.',
       resetButton: 'Start over from scratch',
@@ -845,6 +849,8 @@ export const translations = {
     settings: {
       title: 'Ajustes',
       language: 'Idioma de la interfaz',
+      changeLang: 'Cambiar idioma',
+      changeLangDesc: 'Elige el idioma de visualización de la interfaz',
       dangerZone: 'Zona de peligro',
       dangerZoneDesc: 'Acciones irreversibles en tu cuenta.',
       resetButton: 'Empezar desde cero',
@@ -1152,6 +1158,8 @@ export const translations = {
     settings: {
       title: 'Einstellungen',
       language: 'Sprache der Oberfläche',
+      changeLang: 'Sprache ändern',
+      changeLangDesc: 'Wähle die Anzeigesprache der Benutzeroberfläche',
       dangerZone: 'Gefahrenzone',
       dangerZoneDesc: 'Unwiderrufliche Aktionen für dein Konto.',
       resetButton: 'Von vorne anfangen',
@@ -1459,6 +1467,8 @@ export const translations = {
     settings: {
       title: 'Ayarlar',
       language: 'Arayüz dili',
+      changeLang: 'Dili değiştir',
+      changeLangDesc: 'Arayüzün görüntüleme dilini seçin',
       dangerZone: 'Tehlikeli bölge',
       dangerZoneDesc: 'Hesabınız için geri alınamaz işlemler.',
       resetButton: 'Sıfırdan başla',

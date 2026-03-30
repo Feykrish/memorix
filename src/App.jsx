@@ -13,16 +13,31 @@ import Journal from './screens/Journal';
 import DailyErrors from './screens/DailyErrors';
 import Settings from './screens/Settings';
 import NotificationPermission from './screens/NotificationPermission';
+import LanguagePicker from './screens/LanguagePicker';
+
+// Migration: if user already has memorix-lang set, auto-mark langue_interface
+// so existing users are not sent to the language picker
+if (localStorage.getItem('memorix-lang') && !localStorage.getItem('langue_interface')) {
+  localStorage.setItem('langue_interface', localStorage.getItem('memorix-lang'));
+}
 
 function AppRoutes() {
+  const hasChosenLang = !!localStorage.getItem('langue_interface');
   const isOnboarded = localStorage.getItem('memorix-onboarded') === 'true';
 
   return (
     <Routes>
       <Route
         path="/"
-        element={isOnboarded ? <Navigate to="/home" replace /> : <Navigate to="/onboarding" replace />}
+        element={
+          !hasChosenLang
+            ? <Navigate to="/language-picker" replace />
+            : isOnboarded
+            ? <Navigate to="/home" replace />
+            : <Navigate to="/onboarding" replace />
+        }
       />
+      <Route path="/language-picker" element={<LanguagePicker />} />
       <Route path="/onboarding" element={<Onboarding />} />
       <Route path="/home" element={<Home />} />
       <Route path="/subcategories/:categoryKey" element={<SubCategories />} />
