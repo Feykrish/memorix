@@ -27,6 +27,18 @@ export function getNiveauLabel(niveau) {
   return 'Débutant';
 }
 
+export function getNiveauBadge(niveau) {
+  if (niveau === 'expert') return { emoji: '🔥', label: 'Expert', cls: 'bg-error/10 text-error' };
+  if (niveau === 'intermediaire') return { emoji: '⭐⭐', label: 'Intermédiaire', cls: 'bg-amber-500/10 text-amber-500' };
+  return { emoji: '⭐', label: 'Débutant', cls: 'bg-success/10 text-success' };
+}
+
+export function getProgressionText(total, niveau) {
+  if (niveau === 'expert') return 'Niveau maximum atteint 🏆';
+  if (niveau === 'intermediaire') return `Intermédiaire : ${total - 15}/25 bonnes réponses`;
+  return `Débutant : ${total}/15 bonnes réponses`;
+}
+
 /**
  * Returns { total, niveau } for a category.
  */

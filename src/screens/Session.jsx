@@ -7,7 +7,7 @@ import { findSessionByCategorySub, markSessionCompleted, saveDailyErrors } from 
 import { getAskedQuestions, addToHistory, getPendingCount } from '../data/questionHistory';
 import { generateQuestions, evaluateAnswer, generateHarderQuestions, generateFreeLearnQuestions, generateChoicesForQuestions } from '../api/claude';
 import { syncSession } from '../lib/supabaseSync';
-import { addCorrectAnswers, getNiveauLabel } from '../data/progressionStore';
+import { addCorrectAnswers, getNiveauLabel, getNiveauBadge, getProgressionText, getProgression } from '../data/progressionStore';
 import HomeButton from '../components/HomeButton';
 import BackButton from '../components/BackButton';
 import ThemeToggle from '../components/ThemeToggle';
@@ -55,7 +55,9 @@ export default function Session() {
   const [reviewCount, setReviewCount] = useState(0);
   const [showPerfectMessage, setShowPerfectMessage] = useState(false);
   const [showMaxPending, setShowMaxPending] = useState(false);
-  const [levelUpMessage, setLevelUpMessage] = useState('');
+  const [showLevelUpAnim, setShowLevelUpAnim] = useState(null); // { newNiveau, label }
+  const [pendingLevelUp, setPendingLevelUp] = useState(null);
+  const [progression, setProgression] = useState(() => isFreeLearn ? null : getProgression(category));
 
   const JE_NE_SAIS_PAS = '🤷 Je ne sais pas';
 
@@ -255,9 +257,10 @@ export default function Session() {
     // Progression: track correct answers per category (non-review only)
     if (correct && !question.isReview) {
       const { levelUp, newNiveau } = addCorrectAnswers(category, 1);
+      const newProgression = getProgression(category);
+      setProgression(newProgression);
       if (levelUp) {
-        setLevelUpMessage(`🎉 Niveau supérieur débloqué ! Vous passez en mode ${getNiveauLabel(newNiveau)} !`);
-        setTimeout(() => setLevelUpMessage(''), 4000);
+        setPendingLevelUp({ newNiveau, label: getNiveauLabel(newNiveau) });
       }
     }
 
@@ -302,34 +305,48 @@ export default function Session() {
   }, [selectedChoice, question, showResult, category, sub, difficulty, questionCount]);
 
   const handleNext = useCallback(async () => {
-    if (currentIndex < questions.length - 1) {
-      setCurrentIndex((i) => i + 1);
-      setSelectedChoice('');
-      setShowResult(false);
-      setEvalData(null);
-      return;
-    }
-
-    if (phase === 'review') {
-      console.log(`\n─── Review phase complete ───`);
-      const updatedPending = getPendingCount(category, sub);
-      setPendingCount(updatedPending);
-      console.log(`📅 Questions en attente après review: ${updatedPending}`);
-      await loadNewQuestions(updatedPending);
-      return;
-    }
-
-    if (phase === 'new' || phase === 'harder') {
-      console.log(`📊 Bilan: ${newWrongCount} mauvaises réponses sur nouvelles (minimum: ${LEARN_GOAL})`);
-
-      if (newWrongCount < LEARN_GOAL) {
-        await loadHarderQuestions();
+    const proceed = async () => {
+      if (currentIndex < questions.length - 1) {
+        setCurrentIndex((i) => i + 1);
+        setSelectedChoice('');
+        setShowResult(false);
+        setEvalData(null);
         return;
       }
 
-      finishSession();
+      if (phase === 'review') {
+        console.log(`\n─── Review phase complete ───`);
+        const updatedPending = getPendingCount(category, sub);
+        setPendingCount(updatedPending);
+        console.log(`📅 Questions en attente après review: ${updatedPending}`);
+        await loadNewQuestions(updatedPending);
+        return;
+      }
+
+      if (phase === 'new' || phase === 'harder') {
+        console.log(`📊 Bilan: ${newWrongCount} mauvaises réponses sur nouvelles (minimum: ${LEARN_GOAL})`);
+        if (newWrongCount < LEARN_GOAL) {
+          await loadHarderQuestions();
+          return;
+        }
+        finishSession();
+      }
+    };
+
+    // Show level-up animation before proceeding
+    if (pendingLevelUp) {
+      const lu = pendingLevelUp;
+      setPendingLevelUp(null);
+      setShowLevelUpAnim(lu);
+      setTimeout(async () => {
+        setShowLevelUpAnim(null);
+        await proceed();
+      }, 2000);
+      return;
     }
-  }, [currentIndex, questions.length, phase, newWrongCount, category, sub]);
+
+    await proceed();
+  }, [currentIndex, questions.length, phase, newWrongCount, category, sub, pendingLevelUp]);
 
   function finishSession() {
     console.log(`\n═══ SESSION COMPLETE ═══`);
@@ -433,14 +450,25 @@ export default function Session() {
     return (s.sessionSummaryNewOnly || '').replace('{new}', questions.length);
   })();
 
+  // ─── Level-up full-screen animation ────────────────────────────────
+  if (showLevelUpAnim) {
+    const badge = getNiveauBadge(showLevelUpAnim.newNiveau);
+    return (
+      <div className="min-h-dvh bg-primary/10 flex flex-col items-center justify-center px-8 gap-4">
+        <div className="text-6xl animate-bounce">🎉</div>
+        <p className="text-2xl font-bold text-primary text-center">Niveau supérieur débloqué !</p>
+        <div className={`px-5 py-2 rounded-full text-base font-bold ${badge.cls}`}>
+          {badge.emoji} {badge.label}
+        </div>
+        <p className="text-sm text-text2 text-center">
+          Vous passez en mode <span className="font-semibold">{showLevelUpAnim.label}</span> dans <span className="font-semibold">{categoryLabel}</span>
+        </p>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-dvh bg-bg flex flex-col">
-      {/* Level-up toast */}
-      {levelUpMessage && (
-        <div className="fixed top-4 left-1/2 -translate-x-1/2 z-50 bg-primary text-white text-sm font-bold px-5 py-3 rounded-2xl shadow-lg animate-pulse max-w-xs text-center">
-          {levelUpMessage}
-        </div>
-      )}
       <div className="max-w-lg mx-auto w-full px-5 py-5 flex flex-col flex-1">
         {/* Header */}
         <div className="flex items-center justify-between mb-1">
@@ -498,7 +526,7 @@ export default function Session() {
             : 'border-l-primary bg-primary/[0.03]'
         }`}>
           {/* Badge row */}
-          <div className="mb-3 flex gap-2 flex-wrap items-center">
+          <div className="mb-1 flex gap-2 flex-wrap items-center">
             {question.isReview ? (
               <span className="inline-block text-xs font-semibold px-3 py-1 rounded-full bg-reminder/10 text-reminder">
                 {s.toReview}
@@ -508,12 +536,25 @@ export default function Session() {
                 {s.newBadge || s.newQuestion}
               </span>
             )}
+            {/* Difficulty badge */}
+            {!isFreeLearn && progression && (() => {
+              const badge = getNiveauBadge(progression.niveau);
+              return (
+                <span className={`inline-block text-xs font-semibold px-3 py-1 rounded-full ${badge.cls}`}>
+                  {badge.emoji} {badge.label}
+                </span>
+              );
+            })()}
             {phase === 'harder' && (
               <span className="inline-block text-xs font-semibold px-3 py-1 rounded-full bg-error/10 text-error">
                 🔥 Expert
               </span>
             )}
           </div>
+          {/* Progression text */}
+          {!isFreeLearn && progression && (
+            <p className="text-xs text-text3 mb-3">{getProgressionText(progression.total, progression.niveau)}</p>
+          )}
 
           {question.isReview && (
             <p className="text-xs text-reminder/70 mb-2 italic">{s.reviewHint}</p>

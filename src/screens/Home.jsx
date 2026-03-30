@@ -4,6 +4,7 @@ import { useLang } from '../context/LangContext';
 import { categories } from '../data/categories';
 import { getSessions, removeSession, resetDailySessions, getDailyErrors } from '../data/sessionStore';
 import { getReviewsDueToday, getReviewCount, simulateNextDay, getSimDayOffset, getSimulatedToday } from '../data/reviewStore';
+import { getProgression, getNiveauBadge } from '../data/progressionStore';
 import { isNotifAsked, initNotifications, recordActivity } from '../data/notificationStore';
 import LangSelector from '../components/LangSelector';
 import ThemeToggle from '../components/ThemeToggle';
@@ -189,7 +190,18 @@ export default function Home() {
                       <div className="flex items-start gap-3 min-w-0">
                         <span className="text-xl mt-0.5">{emoji}</span>
                         <div className="min-w-0">
-                          <p className="text-sm font-bold text-text">{catLabel} · {subLabel}</p>
+                          <p className="text-sm font-bold text-text flex items-center gap-1.5 flex-wrap">
+                            <span>{catLabel} · {subLabel}</span>
+                            {s.category !== 'freelearn' && (() => {
+                              const prog = getProgression(s.category);
+                              const badge = getNiveauBadge(prog.niveau);
+                              return (
+                                <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${badge.cls}`}>
+                                  {badge.emoji} {badge.label}
+                                </span>
+                              );
+                            })()}
+                          </p>
                           <p className={`text-xs font-medium mt-0.5 ${status.color}`}>{status.label}</p>
                           <p className="text-xs text-text3 mt-1">{s.knowledgeCount} {h.knowledge}</p>
                         </div>
