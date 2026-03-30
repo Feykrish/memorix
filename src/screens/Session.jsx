@@ -78,7 +78,12 @@ export default function Session() {
       if (question.answer && !choices.includes(question.answer)) {
         choices = [question.answer, ...choices.slice(0, 3)];
       }
-      setShuffledChoices(choices.sort(() => Math.random() - 0.5));
+      // Fisher-Yates shuffle — purely random each display, never same order twice
+      for (let i = choices.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [choices[i], choices[j]] = [choices[j], choices[i]];
+      }
+      setShuffledChoices(choices);
     } else {
       setShuffledChoices([]);
     }
