@@ -11,7 +11,8 @@
     "build": "vite build",
     "lint": "eslint .",
     "preview": "vite preview",
-    "seed": "node scripts/seed.js"
+    "seed": "node scripts/seed.js",
+    "seed-choices": "node scripts/seed-choices.js"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.100.1",
