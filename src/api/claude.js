@@ -53,8 +53,15 @@ async function callClaude(system, userMessage) {
 
 // ─── 1. Generate Questions ───────────────────────────────────────────
 
-const SYSTEM_QUESTIONS = `Tu es le moteur de questions de Memorix, une app de mémorisation.
-Tu génères des questions culturelles précises et engageantes.
+const LANG_NAMES = {
+  fr: 'français', en: 'anglais', es: 'espagnol', de: 'allemand', tr: 'turc',
+};
+
+function buildSystemPrompt(langue = 'fr') {
+  const nomLangue = LANG_NAMES[langue] || 'français';
+  return `Tu es le moteur de questions de Memorix, une app de mémorisation.
+Génère des questions culturelles précises et engageantes UNIQUEMENT en ${nomLangue}.
+IMPORTANT : toutes les questions, réponses, choix et anecdotes doivent être rédigés en ${nomLangue}. Les noms propres, dates et chiffres restent identiques dans toutes les langues.
 Niveau facile = faits connus du grand public.
 Niveau moyen = détails importants que les curieux connaissent.
 Niveau difficile = questions précises et nuancées pour les experts.
@@ -62,6 +69,10 @@ Niveau auto = mélange équilibré des trois niveaux.
 Pour la catégorie Monothéismes : sois factuel, neutre et respectueux.
 IMPORTANT pour l'Islam : tu génères UNIQUEMENT des questions sur l'islam sunnite. Ne génère aucune question sur les chiites, l'islam chiite, les différences sunnites/chiites, ou toute autre branche de l'islam. Concentre-toi exclusivement sur les piliers, le Coran, le Prophète Muhammad, les compagnons, l'histoire sunnite, la jurisprudence sunnite (fiqh), et les grandes figures de l'islam sunnite.
 Réponds UNIQUEMENT en JSON valide, sans texte supplémentaire.`;
+}
+
+// Keep SYSTEM_QUESTIONS as a French constant (used for choice generation utilities)
+const SYSTEM_QUESTIONS = buildSystemPrompt('fr');
 
 export async function generateQuestions(category, subCategory, difficulty, count, alreadyAsked = [], langue = 'fr') {
   console.log(`🔍 generateQuestions: ${category} · ${subCategory}, difficulty=${difficulty}, count=${count}, alreadyAsked=${alreadyAsked.length}`);
@@ -139,7 +150,7 @@ Les mauvaises réponses doivent être plausibles mais clairement fausses pour qu
 INTERDIT : les mauvaises réponses ne doivent JAMAIS être des variantes orthographiques ou translittérations de la bonne réponse. Exemple interdit : "Oummah" si la réponse est "Ummah", "Kibla" si la réponse est "Qibla", "Mohamed" si la réponse est "Muhammad". Les mauvaises réponses doivent être des concepts COMPLÈTEMENT DIFFÉRENTS du même domaine.
 Ne génère JAMAIS 4 mauvaises réponses. La bonne réponse doit toujours être présente.`;
 
-  const data = await callClaude(SYSTEM_QUESTIONS, user);
+  const data = await callClaude(buildSystemPrompt(langue), user);
   const questions = (data.questions || []).map((q, i) => ({
     id: q.id || i + 1,
     text: q.question,
@@ -155,9 +166,9 @@ Ne génère JAMAIS 4 mauvaises réponses. La bonne réponse doit toujours être 
     isReview: false,
   }));
 
-  console.log(`✅ Generated ${questions.length} questions:`, questions.map((q) => q.text.slice(0, 50)));
+  console.log(`✅ Generated ${questions.length} questions [${langue}]:`, questions.map((q) => q.text.slice(0, 50)));
 
-  // 3. Save to cache (non-blocking)
+  // 3. Save to cache with the correct langue (non-blocking)
   saveToCache(questions, category, subCategory, difficulty, langue).catch(() => {});
 
   return questions;
@@ -377,12 +388,14 @@ Réponds avec ce JSON exactement :
 
 // ─── 4. Generate FreeLearn Questions ─────────────────────────────────
 
-export async function generateFreeLearnQuestions(topic, level, aspect, count, alreadyAsked = []) {
+export async function generateFreeLearnQuestions(topic, level, aspect, count, alreadyAsked = [], langue = 'fr') {
+  const nomLangue = LANG_NAMES[langue] || 'français';
   const system = `Tu es le moteur de questions personnalisé de Memorix.
 L'utilisateur veut apprendre sur : ${topic}.
 Niveau : ${level}.
 Aspect privilégié : ${aspect}.
-Génère des questions précises, progressives et engageantes sur exactement ce sujet.
+Génère des questions précises, progressives et engageantes sur exactement ce sujet UNIQUEMENT en ${nomLangue}.
+IMPORTANT : toutes les questions, réponses, choix et anecdotes doivent être rédigés en ${nomLangue}. Les noms propres, dates et chiffres restent identiques.
 Les questions doivent aller du plus simple au plus complexe.
 Chaque question doit apporter une vraie connaissance nouvelle et mémorable.
 Réponds UNIQUEMENT en JSON valide, sans texte supplémentaire.`;
@@ -430,7 +443,7 @@ RÈGLE ABSOLUE pour "choix" : le PREMIER élément DOIT être identique à "repo
 
 // ─── 5. Generate Harder Questions ────────────────────────────────────
 
-export async function generateHarderQuestions(category, subCategory, previousQuestions = [], fullHistory = []) {
+export async function generateHarderQuestions(category, subCategory, previousQuestions = [], fullHistory = [], langue = 'fr') {
   const avoid = [...new Set([...fullHistory, ...previousQuestions.map((q) => q.text || q.question || q)])];
 
   const user = `L'utilisateur a répondu correctement à TOUTES les questions précédentes sur "${category}" · "${subCategory}".
@@ -457,7 +470,7 @@ Réponds avec ce JSON exactement :
 
 RÈGLE ABSOLUE pour "choix" : le PREMIER élément DOIT être identique à "reponse_correcte". Les mauvaises réponses ne doivent JAMAIS contenir des mots significatifs de la question. Les mauvaises réponses ne doivent JAMAIS être des variantes orthographiques ou translittérations de la bonne réponse — elles doivent être des concepts complètement différents. Ne génère JAMAIS 4 mauvaises réponses.`;
 
-  const data = await callClaude(SYSTEM_QUESTIONS, user);
+  const data = await callClaude(buildSystemPrompt(langue), user);
   return (data.questions || []).map((q, i) => ({
     id: q.id || i + 1,
     text: q.question,

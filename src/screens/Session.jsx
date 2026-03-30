@@ -6,7 +6,6 @@ import { addJournalEntry } from '../data/journalStore';
 import { findSessionByCategorySub, markSessionCompleted, saveDailyErrors } from '../data/sessionStore';
 import { getAskedQuestions, addToHistory, getPendingCount } from '../data/questionHistory';
 import { generateQuestions, evaluateAnswer, generateHarderQuestions, generateFreeLearnQuestions, generateChoicesForQuestions } from '../api/claude';
-import { translateQuestions } from '../lib/translationCache';
 import { syncSession } from '../lib/supabaseSync';
 import { addCorrectAnswers, getNiveauLabel, getNiveauBadge, getProgressionText, getProgression } from '../data/progressionStore';
 import HomeButton from '../components/HomeButton';
@@ -54,7 +53,6 @@ export default function Session() {
   const [newWrongCount, setNewWrongCount] = useState(0);
   const [loadingFromAPI, setLoadingFromAPI] = useState(false);
   const [loadingChoices, setLoadingChoices] = useState(false);
-  const [loadingTranslation, setLoadingTranslation] = useState(false);
   const [reviewCount, setReviewCount] = useState(0);
   const [showPerfectMessage, setShowPerfectMessage] = useState(false);
   const [showMaxPending, setShowMaxPending] = useState(false);
@@ -143,10 +141,7 @@ export default function Session() {
       setLoadingChoices(true);
       const withChoices = await generateChoicesForQuestions(reviewQuestions, category);
       setLoadingChoices(false);
-      setLoadingTranslation(lang !== 'fr');
-      const finalReview = await translateQuestions(withChoices, lang);
-      setLoadingTranslation(false);
-      setQuestions(finalReview);
+      setQuestions(withChoices);
       setCurrentIndex(0);
       setPhase('review');
       setLoading(false);
@@ -185,14 +180,11 @@ export default function Session() {
       setLoadingChoices(true);
       const withChoices = await generateChoicesForQuestions(newQuestions, category);
       setLoadingChoices(false);
-      setLoadingTranslation(lang !== 'fr');
-      const finalQuestions = await translateQuestions(withChoices, lang);
-      setLoadingTranslation(false);
 
-      console.log(`✅ Questions générées: ${finalQuestions.length}`);
-      finalQuestions.forEach((q, i) => console.log(`   ${i + 1}. ${q.text.slice(0, 60)}...`));
+      console.log(`✅ Questions générées: ${withChoices.length}`);
+      withChoices.forEach((q, i) => console.log(`   ${i + 1}. ${q.text.slice(0, 60)}...`));
 
-      setQuestions(finalQuestions);
+      setQuestions(withChoices);
       setCurrentIndex(0);
       setSelectedChoice('');
       setShowResult(false);
@@ -215,19 +207,16 @@ export default function Session() {
     try {
       const history = getAskedQuestions(category, sub);
       const harder = isFreeLearn
-        ? await generateFreeLearnQuestions(flTopic, flLevel, flAspect, LEARN_GOAL, history)
-        : await generateHarderQuestions(categoryLabel, subLabel, questions, history);
+        ? await generateFreeLearnQuestions(flTopic, flLevel, flAspect, LEARN_GOAL, history, lang)
+        : await generateHarderQuestions(categoryLabel, subLabel, questions, history, lang);
 
       addToHistory(category, sub, harder.map((q) => q.text));
       setLoadingChoices(true);
       const withChoices = await generateChoicesForQuestions(harder, category);
       setLoadingChoices(false);
-      setLoadingTranslation(lang !== 'fr');
-      const finalHarder = await translateQuestions(withChoices, lang);
-      setLoadingTranslation(false);
-      console.log(`✅ Questions difficiles générées: ${finalHarder.length}`);
+      console.log(`✅ Questions difficiles générées: ${withChoices.length}`);
 
-      setQuestions(finalHarder);
+      setQuestions(withChoices);
       setCurrentIndex(0);
       setSelectedChoice('');
       setShowResult(false);
@@ -397,19 +386,17 @@ export default function Session() {
   // ─── RENDER STATES ─────────────────────────────────────────────────
 
   if (loading) {
-    const loadMsg = loadingTranslation
-      ? '🌍 Traduction en cours...'
-      : loadingChoices
+    const loadMsg = loadingChoices
       ? '⚡ Préparation des choix...'
       : loadingFromAPI
       ? '🧠 L\'IA prépare vos questions personnalisées...'
       : '📚 Chargement de vos questions...';
-    const loadEmoji = loadingTranslation ? '🌍' : loadingChoices ? '⚡' : '🧠';
+    const loadEmoji = loadingChoices ? '⚡' : '🧠';
     return (
       <div className="min-h-dvh bg-bg flex flex-col items-center justify-center px-8">
         <div className="text-5xl mb-6 animate-pulse">{loadEmoji}</div>
         <p className="text-lg font-semibold text-primary text-center">{loadMsg}</p>
-        {(loadingFromAPI || loadingChoices || loadingTranslation) && (
+        {(loadingFromAPI || loadingChoices) && (
           <p className="text-sm text-text3 mt-2 animate-pulse">quelques secondes...</p>
         )}
       </div>
