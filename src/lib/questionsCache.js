@@ -34,13 +34,35 @@ export async function getCachedQuestions(categorie, sousCategorie, niveau, langu
     }
 
     // flatMap handles: single object, array, or {questions:[...]} per row
-    const allQuestions = data.flatMap((row) => {
+    const rawQuestions = data.flatMap((row) => {
       const c = row.contenu;
       if (Array.isArray(c)) return c;
       if (c?.questions && Array.isArray(c.questions)) return c.questions;
       if (c && typeof c === 'object') return [c];
       return [];
     });
+
+    // Normalize inconsistent field names from seeded/legacy data
+    const allQuestions = rawQuestions
+      .map((raw) => {
+        const text    = raw.text    || raw.question            || '';
+        const answer  = raw.answer  || raw.reponse_correcte    || '';
+        const choices = raw.choices || raw.choix               || [];
+        // Inject correct answer if missing
+        const safeChoices = choices.includes(answer) ? choices : (answer ? [answer, ...choices] : choices);
+        return {
+          id:         raw.id        || undefined,
+          text,
+          answer,
+          choices:    safeChoices,
+          keywords:   raw.keywords  || raw.mots_cles           || [],
+          anecdote:   raw.anecdote  || '',
+          hint:       raw.hint      || raw.indice              || '',
+          difficulty: raw.difficulty || raw.difficulte         || 'moyen',
+          isReview:   false,
+        };
+      })
+      .filter((q) => q.text && q.choices.length >= 4);
 
     console.log(`✅ Cache HIT — ${allQuestions.length} questions disponibles après flatMap`);
 

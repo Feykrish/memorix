@@ -19,6 +19,38 @@ function formatTime(seconds) {
   return `${m}:${s.toString().padStart(2, '0')}`;
 }
 
+/**
+ * Resolve choices from any question shape (API, cache, legacy seed).
+ * Handles: choices / choix / contenu.choices / contenu.choix.
+ * Injects correct answer if missing.
+ * Returns null if < 4 choices → question should be skipped.
+ */
+function getChoix(question) {
+  const choix = [
+    ...(question.choices
+      || question.choix
+      || question.contenu?.choices
+      || question.contenu?.choix
+      || []),
+  ];
+  const reponse =
+    question.answer
+    || question.reponse_correcte
+    || question.contenu?.reponse_correcte
+    || '';
+  if (reponse && !choix.includes(reponse)) choix.push(reponse);
+  if (choix.length < 4) {
+    console.warn('⏭ Question avec choix insuffisants (skippée):', question.id, '—', choix.length, 'choix');
+    return null;
+  }
+  return choix;
+}
+
+/** Filter a question array, removing those with < 4 resolvable choices. */
+function filterValidQuestions(questions) {
+  return questions.filter((q) => getChoix(q) !== null);
+}
+
 export default function Session() {
   const { t, lang } = useLang();
   const navigate = useNavigate();
@@ -73,27 +105,36 @@ export default function Session() {
     return sub;
   })();
 
-  // Shuffle choices when question changes — always ensure correct answer is present
+  // Shuffle choices when question changes — auto-skip if < 4 valid choices
   useEffect(() => {
-    if (question?.choices?.length) {
-      let choices = [...question.choices];
-      // Client-side safety: if correct answer missing, inject it
-      if (question.answer && !choices.includes(question.answer)) {
-        choices = [question.answer, ...choices.slice(0, 3)];
-      }
-      // Fisher-Yates shuffle — purely random each display, never same order twice
-      for (let i = choices.length - 1; i > 0; i--) {
-        const j = Math.floor(Math.random() * (i + 1));
-        [choices[i], choices[j]] = [choices[j], choices[i]];
-      }
-      setShuffledChoices(choices);
-    } else {
-      setShuffledChoices([]);
+    if (!question) return;
+
+    const resolved = getChoix(question);
+    if (resolved === null) {
+      // Skip this question immediately (bad data — already warned in getChoix)
+      setCurrentIndex((prev) => prev + 1);
+      return;
     }
+
+    // Fisher-Yates shuffle
+    const choices = [...resolved];
+    for (let i = choices.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [choices[i], choices[j]] = [choices[j], choices[i]];
+    }
+    setShuffledChoices(choices);
     setSelectedChoice('');
     setShowResult(false);
     setEvalData(null);
   }, [question?.id]);
+
+  // If auto-skip pushed currentIndex past the last question, finish the session
+  useEffect(() => {
+    if (!loading && questions.length > 0 && currentIndex >= questions.length) {
+      finishSession();
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentIndex, questions.length, loading]);
 
   // Timer
   useEffect(() => {
@@ -141,7 +182,7 @@ export default function Session() {
       setLoadingChoices(true);
       const withChoices = await generateChoicesForQuestions(reviewQuestions, category);
       setLoadingChoices(false);
-      setQuestions(withChoices);
+      setQuestions(filterValidQuestions(withChoices));
       setCurrentIndex(0);
       setPhase('review');
       setLoading(false);
@@ -181,10 +222,11 @@ export default function Session() {
       const withChoices = await generateChoicesForQuestions(newQuestions, category);
       setLoadingChoices(false);
 
-      console.log(`✅ Questions générées: ${withChoices.length}`);
-      withChoices.forEach((q, i) => console.log(`   ${i + 1}. ${q.text.slice(0, 60)}...`));
+      const validQuestions = filterValidQuestions(withChoices);
+      console.log(`✅ Questions valides: ${validQuestions.length}/${withChoices.length}`);
+      validQuestions.forEach((q, i) => console.log(`   ${i + 1}. ${q.text.slice(0, 60)}...`));
 
-      setQuestions(withChoices);
+      setQuestions(validQuestions);
       setCurrentIndex(0);
       setSelectedChoice('');
       setShowResult(false);
@@ -214,9 +256,11 @@ export default function Session() {
       setLoadingChoices(true);
       const withChoices = await generateChoicesForQuestions(harder, category);
       setLoadingChoices(false);
-      console.log(`✅ Questions difficiles générées: ${withChoices.length}`);
 
-      setQuestions(withChoices);
+      const validHarder = filterValidQuestions(withChoices);
+      console.log(`✅ Questions difficiles valides: ${validHarder.length}/${withChoices.length}`);
+
+      setQuestions(validHarder);
       setCurrentIndex(0);
       setSelectedChoice('');
       setShowResult(false);
