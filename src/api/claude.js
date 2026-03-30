@@ -112,7 +112,9 @@ Réponds avec ce JSON exactement :
 
 RÈGLE ABSOLUE pour "choix" : le tableau DOIT contenir EXACTEMENT 4 éléments.
 Le PREMIER élément de "choix" DOIT être identique à "reponse_correcte".
-Les 3 autres sont des mauvaises réponses plausibles du même registre.
+Les 3 mauvaises réponses DOIVENT être du même TYPE que la bonne réponse (ex: si la réponse est un nom de bataille, les mauvaises sont aussi des noms de batailles).
+Les mauvaises réponses NE DOIVENT JAMAIS contenir des mots significatifs présents dans la question.
+Les mauvaises réponses doivent être plausibles mais clairement fausses pour quelqu'un qui connaît le sujet.
 Ne génère JAMAIS 4 mauvaises réponses. La bonne réponse doit toujours être présente.`;
 
   const data = await callClaude(SYSTEM_QUESTIONS, user);
@@ -287,7 +289,7 @@ Réponds avec ce JSON exactement :
   ]
 }
 
-RÈGLE ABSOLUE pour "choix" : le PREMIER élément DOIT être identique à "reponse_correcte". Ne génère JAMAIS 4 mauvaises réponses.`;
+RÈGLE ABSOLUE pour "choix" : le PREMIER élément DOIT être identique à "reponse_correcte". Les mauvaises réponses ne doivent JAMAIS contenir des mots significatifs de la question. Ne génère JAMAIS 4 mauvaises réponses.`;
 
   const data = await callClaude(system, user);
   return (data.questions || []).map((q, i) => ({
@@ -330,7 +332,7 @@ Réponds avec ce JSON exactement :
   ]
 }
 
-RÈGLE ABSOLUE pour "choix" : le PREMIER élément DOIT être identique à "reponse_correcte". Ne génère JAMAIS 4 mauvaises réponses.`;
+RÈGLE ABSOLUE pour "choix" : le PREMIER élément DOIT être identique à "reponse_correcte". Les mauvaises réponses ne doivent JAMAIS contenir des mots significatifs de la question. Ne génère JAMAIS 4 mauvaises réponses.`;
 
   const data = await callClaude(SYSTEM_QUESTIONS, user);
   return (data.questions || []).map((q, i) => ({

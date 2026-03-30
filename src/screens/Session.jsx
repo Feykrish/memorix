@@ -7,6 +7,7 @@ import { findSessionByCategorySub, markSessionCompleted, saveDailyErrors } from 
 import { getAskedQuestions, addToHistory, getPendingCount } from '../data/questionHistory';
 import { generateQuestions, evaluateAnswer, generateHarderQuestions, generateFreeLearnQuestions, generateChoicesForQuestions } from '../api/claude';
 import { syncSession } from '../lib/supabaseSync';
+import { addCorrectAnswers, getNiveauLabel } from '../data/progressionStore';
 import HomeButton from '../components/HomeButton';
 import BackButton from '../components/BackButton';
 import ThemeToggle from '../components/ThemeToggle';
@@ -54,6 +55,9 @@ export default function Session() {
   const [reviewCount, setReviewCount] = useState(0);
   const [showPerfectMessage, setShowPerfectMessage] = useState(false);
   const [showMaxPending, setShowMaxPending] = useState(false);
+  const [levelUpMessage, setLevelUpMessage] = useState('');
+
+  const JE_NE_SAIS_PAS = '🤷 Je ne sais pas';
 
   const question = questions[currentIndex];
   const s = t.session;
@@ -219,7 +223,11 @@ export default function Session() {
     if (!question) return;
     if (showResult) return;
 
-    const evaluation = evaluateAnswer(question.answer, selectedChoice);
+    // "Je ne sais pas" always counts as incorrect
+    const isSkip = selectedChoice === JE_NE_SAIS_PAS;
+    const evaluation = isSkip
+      ? { result: 'incorrect', score: 0, isCorrect: false, message: "Pas de problème — vous venez d'apprendre quelque chose de nouveau !", correction: question.answer, missing: null }
+      : evaluateAnswer(question.answer, selectedChoice);
     const correct = evaluation.isCorrect;
 
     console.log(`📝 Réponse évaluée: ${correct ? '✅ correct' : '❌ incorrect'} — "${question.text.slice(0, 40)}..."`);
@@ -238,6 +246,15 @@ export default function Session() {
       isReview: question.isReview,
     };
     setAllResults((prev) => [...prev, result]);
+
+    // Progression: track correct answers per category (non-review only)
+    if (correct && !question.isReview) {
+      const { levelUp, newNiveau } = addCorrectAnswers(category, 1);
+      if (levelUp) {
+        setLevelUpMessage(`🎉 Niveau supérieur débloqué ! Vous passez en mode ${getNiveauLabel(newNiveau)} !`);
+        setTimeout(() => setLevelUpMessage(''), 4000);
+      }
+    }
 
     if (question.isReview) {
       if (correct) {
@@ -413,6 +430,12 @@ export default function Session() {
 
   return (
     <div className="min-h-dvh bg-bg flex flex-col">
+      {/* Level-up toast */}
+      {levelUpMessage && (
+        <div className="fixed top-4 left-1/2 -translate-x-1/2 z-50 bg-primary text-white text-sm font-bold px-5 py-3 rounded-2xl shadow-lg animate-pulse max-w-xs text-center">
+          {levelUpMessage}
+        </div>
+      )}
       <div className="max-w-lg mx-auto w-full px-5 py-5 flex flex-col flex-1">
         {/* Header */}
         <div className="flex items-center justify-between mb-1">
@@ -523,6 +546,23 @@ export default function Session() {
               );
             }) : (
               <p className="text-sm text-text3 animate-pulse">Chargement des choix...</p>
+            )}
+
+            {/* Je ne sais pas — always last, separated */}
+            {!showResult && (
+              <>
+                <div className="border-t border-border/40 mt-1" />
+                <button
+                  onClick={() => setSelectedChoice(JE_NE_SAIS_PAS)}
+                  className={`w-full py-3 px-4 rounded-xl border-2 text-left text-sm transition-all cursor-pointer ${
+                    selectedChoice === JE_NE_SAIS_PAS
+                      ? 'bg-text3/10 border-text3 text-text3 font-semibold'
+                      : 'bg-card border-border text-text3 hover:border-text3/40'
+                  }`}
+                >
+                  {JE_NE_SAIS_PAS}
+                </button>
+              </>
             )}
           </div>
 
