@@ -115,6 +115,7 @@ Le PREMIER élément de "choix" DOIT être identique à "reponse_correcte".
 Les 3 mauvaises réponses DOIVENT être du même TYPE que la bonne réponse (ex: si la réponse est un nom de bataille, les mauvaises sont aussi des noms de batailles).
 Les mauvaises réponses NE DOIVENT JAMAIS contenir des mots significatifs présents dans la question.
 Les mauvaises réponses doivent être plausibles mais clairement fausses pour quelqu'un qui connaît le sujet.
+INTERDIT : les mauvaises réponses ne doivent JAMAIS être des variantes orthographiques ou translittérations de la bonne réponse. Exemple interdit : "Oummah" si la réponse est "Ummah", "Kibla" si la réponse est "Qibla", "Mohamed" si la réponse est "Muhammad". Les mauvaises réponses doivent être des concepts COMPLÈTEMENT DIFFÉRENTS du même domaine.
 Ne génère JAMAIS 4 mauvaises réponses. La bonne réponse doit toujours être présente.`;
 
   const data = await callClaude(SYSTEM_QUESTIONS, user);
@@ -122,7 +123,10 @@ Ne génère JAMAIS 4 mauvaises réponses. La bonne réponse doit toujours être 
     id: q.id || i + 1,
     text: q.question,
     answer: q.reponse_correcte,
-    choices: ensureCorrectAnswerInChoices(q.choix || [], q.reponse_correcte),
+    choices: ensureCorrectAnswerInChoices(
+      [q.reponse_correcte, ...filtrerChoixSimilaires((q.choix || []).filter(c => c !== q.reponse_correcte), q.reponse_correcte)],
+      q.reponse_correcte
+    ),
     keywords: q.mots_cles || [],
     anecdote: q.anecdote || '',
     hint: q.indice || '',
@@ -143,8 +147,51 @@ Ne génère JAMAIS 4 mauvaises réponses. La bonne réponse doit toujours être 
 function ensureCorrectAnswerInChoices(choices, correctAnswer) {
   if (!correctAnswer) return choices;
   if (choices.includes(correctAnswer)) return choices;
-  // Correct answer missing — replace last element with it
   return [correctAnswer, ...(choices.slice(0, 3))];
+}
+
+// ─── Helper: detect orthographic variants / too-similar answers ───────
+
+function normalize(str) {
+  return (str || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim();
+}
+
+function sontTropSimilaires(mot1, mot2) {
+  const m1 = normalize(mot1);
+  const m2 = normalize(mot2);
+  if (!m1 || !m2) return false;
+  // One contains the other
+  if (m1.includes(m2) || m2.includes(m1)) return true;
+  // Near-identical length with ≤2 character differences (catches transliterations)
+  if (Math.abs(m1.length - m2.length) <= 2) {
+    let diffs = 0;
+    const len = Math.min(m1.length, m2.length);
+    for (let i = 0; i < len; i++) {
+      if (m1[i] !== m2[i]) diffs++;
+    }
+    if (diffs <= 2) return true;
+  }
+  return false;
+}
+
+function filtrerChoixSimilaires(wrongs, correctAnswer) {
+  return wrongs.filter((w) => !sontTropSimilaires(w, correctAnswer));
+}
+
+// Re-generate wrong answers for a single question when too many are similar
+async function regenererMauvaisesReponses(question) {
+  console.log(`⚠️ Régénération des mauvaises réponses pour "${question.text.slice(0, 40)}..."`);
+  const user = `Pour la question : "${question.text}"
+La bonne réponse est : "${question.answer}"
+Génère 3 mauvaises réponses qui sont des concepts COMPLÈTEMENT DIFFÉRENTS de "${question.answer}" — jamais des variantes orthographiques ou translittérations.
+Réponds avec ce JSON uniquement : { "mauvaises": ["réponse 1", "réponse 2", "réponse 3"] }`;
+  try {
+    const data = await callClaude(SYSTEM_QUESTIONS, user);
+    const wrongs = filtrerChoixSimilaires(data.mauvaises || [], question.answer);
+    return [question.answer, ...wrongs.slice(0, 3)];
+  } catch {
+    return [question.answer];
+  }
 }
 
 // ─── 2. Evaluate Answer (MCQ — instant, no API call) ─────────────────
@@ -165,11 +212,20 @@ export function evaluateAnswer(correctAnswer, userAnswer) {
 
 export async function generateChoicesForQuestions(questions) {
   const needChoices = questions.filter((q) => !q.choices || q.choices.length < 4);
-  if (needChoices.length === 0) return questions;
+  if (needChoices.length === 0) {
+    // Still validate existing choices for similarity
+    return Promise.all(questions.map(async (q) => {
+      const valid = filtrerChoixSimilaires(q.choices.filter(c => c !== q.answer), q.answer);
+      if (valid.length >= 3) return { ...q, choices: ensureCorrectAnswerInChoices(q.choices, q.answer) };
+      const rebuilt = await regenererMauvaisesReponses(q);
+      return { ...q, choices: ensureCorrectAnswerInChoices(rebuilt, q.answer) };
+    }));
+  }
 
   console.log(`🎯 Génération des choix QCM pour ${needChoices.length} questions`);
 
-  const user = `Pour chaque question, génère 3 mauvaises réponses plausibles (même registre que la bonne réponse, pas absurdes).
+  const user = `Pour chaque question, génère 3 mauvaises réponses plausibles du même registre que la bonne réponse.
+INTERDIT : variantes orthographiques ou translittérations de la bonne réponse. Les mauvaises réponses doivent être des concepts complètement différents.
 
 ${needChoices.map((q, i) => `${i + 1}. Question : "${q.text}" | Bonne réponse : "${q.answer}"`).join('\n')}
 
@@ -191,14 +247,28 @@ Réponds avec ce JSON exactement :
     });
 
     let needIdx = 0;
-    return questions.map((q) => {
+    const results = await Promise.all(questions.map(async (q) => {
       if (!q.choices || q.choices.length < 4) {
-        const wrongs = choicesByIdx[needIdx++] || [];
-        const built = [q.answer, ...wrongs.slice(0, 3)];
-        return { ...q, choices: ensureCorrectAnswerInChoices(built, q.answer) };
+        const raw = choicesByIdx[needIdx++] || [];
+        const valid = filtrerChoixSimilaires(raw, q.answer);
+        let wrongs = valid.slice(0, 3);
+        // Not enough valid wrongs — regenerate for this question
+        if (wrongs.length < 3) {
+          const rebuilt = await regenererMauvaisesReponses(q);
+          return { ...q, choices: ensureCorrectAnswerInChoices(rebuilt, q.answer) };
+        }
+        return { ...q, choices: ensureCorrectAnswerInChoices([q.answer, ...wrongs], q.answer) };
       }
-      return { ...q, choices: ensureCorrectAnswerInChoices(q.choices, q.answer) };
-    });
+      // Validate existing choices too
+      const existingWrongs = filtrerChoixSimilaires(q.choices.filter(c => c !== q.answer), q.answer);
+      if (existingWrongs.length >= 3) {
+        return { ...q, choices: ensureCorrectAnswerInChoices(q.choices, q.answer) };
+      }
+      const rebuilt = await regenererMauvaisesReponses(q);
+      return { ...q, choices: ensureCorrectAnswerInChoices(rebuilt, q.answer) };
+    }));
+
+    return results;
   } catch (err) {
     console.warn('Failed to generate choices:', err.message);
     return questions;
@@ -289,14 +359,17 @@ Réponds avec ce JSON exactement :
   ]
 }
 
-RÈGLE ABSOLUE pour "choix" : le PREMIER élément DOIT être identique à "reponse_correcte". Les mauvaises réponses ne doivent JAMAIS contenir des mots significatifs de la question. Ne génère JAMAIS 4 mauvaises réponses.`;
+RÈGLE ABSOLUE pour "choix" : le PREMIER élément DOIT être identique à "reponse_correcte". Les mauvaises réponses ne doivent JAMAIS contenir des mots significatifs de la question. Les mauvaises réponses ne doivent JAMAIS être des variantes orthographiques ou translittérations de la bonne réponse — elles doivent être des concepts complètement différents. Ne génère JAMAIS 4 mauvaises réponses.`;
 
   const data = await callClaude(system, user);
   return (data.questions || []).map((q, i) => ({
     id: q.id || i + 1,
     text: q.question,
     answer: q.reponse_correcte,
-    choices: ensureCorrectAnswerInChoices(q.choix || [], q.reponse_correcte),
+    choices: ensureCorrectAnswerInChoices(
+      [q.reponse_correcte, ...filtrerChoixSimilaires((q.choix || []).filter(c => c !== q.reponse_correcte), q.reponse_correcte)],
+      q.reponse_correcte
+    ),
     keywords: q.mots_cles || [],
     anecdote: q.anecdote || '',
     hint: q.indice || '',
@@ -332,14 +405,17 @@ Réponds avec ce JSON exactement :
   ]
 }
 
-RÈGLE ABSOLUE pour "choix" : le PREMIER élément DOIT être identique à "reponse_correcte". Les mauvaises réponses ne doivent JAMAIS contenir des mots significatifs de la question. Ne génère JAMAIS 4 mauvaises réponses.`;
+RÈGLE ABSOLUE pour "choix" : le PREMIER élément DOIT être identique à "reponse_correcte". Les mauvaises réponses ne doivent JAMAIS contenir des mots significatifs de la question. Les mauvaises réponses ne doivent JAMAIS être des variantes orthographiques ou translittérations de la bonne réponse — elles doivent être des concepts complètement différents. Ne génère JAMAIS 4 mauvaises réponses.`;
 
   const data = await callClaude(SYSTEM_QUESTIONS, user);
   return (data.questions || []).map((q, i) => ({
     id: q.id || i + 1,
     text: q.question,
     answer: q.reponse_correcte,
-    choices: ensureCorrectAnswerInChoices(q.choix || [], q.reponse_correcte),
+    choices: ensureCorrectAnswerInChoices(
+      [q.reponse_correcte, ...filtrerChoixSimilaires((q.choix || []).filter(c => c !== q.reponse_correcte), q.reponse_correcte)],
+      q.reponse_correcte
+    ),
     keywords: q.mots_cles || [],
     anecdote: q.anecdote || '',
     hint: q.indice || '',
