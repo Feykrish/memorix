@@ -192,16 +192,19 @@ function sontTropSimilaires(mot1, mot2) {
   const m1 = normalize(mot1);
   const m2 = normalize(mot2);
   if (!m1 || !m2) return false;
-  // One contains the other
-  if (m1.includes(m2) || m2.includes(m1)) return true;
-  // Near-identical length with ≤2 character differences (catches transliterations)
-  if (Math.abs(m1.length - m2.length) <= 2) {
+  // Substring check — only when the shorter string is ≥5 chars.
+  // Avoids false positives with short Islamic/proper names: "Ali", "Umar", "Abu"…
+  const shorter = m1.length <= m2.length ? m1 : m2;
+  if (shorter.length >= 5 && (m1.includes(m2) || m2.includes(m1))) return true;
+  // Exact transliteration check: near-identical short strings (≤8 chars each) with ≤1 diff.
+  // Catches Ummah/Oummah, Qibla/Kibla but NOT Al-Azhar/Al-Aqsa (2 diffs).
+  if (m1.length <= 8 && m2.length <= 8 && Math.abs(m1.length - m2.length) <= 1) {
     let diffs = 0;
     const len = Math.min(m1.length, m2.length);
     for (let i = 0; i < len; i++) {
       if (m1[i] !== m2[i]) diffs++;
     }
-    if (diffs <= 2) return true;
+    if (diffs <= 1) return true;
   }
   return false;
 }
@@ -271,12 +274,12 @@ export async function generateChoicesForQuestions(questions, categorie = '') {
 
   const needChoices = withLocalCache.filter((q) => !q.choices || q.choices.length < 4);
   if (needChoices.length === 0) {
-    // Validate existing choices for similarity
-    return Promise.all(withLocalCache.map(async (q) => {
-      const valid = filtrerChoixSimilaires(q.choices.filter(c => c !== q.answer), q.answer);
-      if (valid.length >= 3) return { ...q, choices: ensureCorrectAnswerInChoices(q.choices, q.answer) };
-      const rebuilt = await regenererMauvaisesReponses(q, categorie);
-      return { ...q, choices: ensureCorrectAnswerInChoices(rebuilt, q.answer) };
+    // All questions already have 4 choices — trust stored data, skip re-validation.
+    // Re-validating causes cascading API calls for Islamic/proper-noun answers that
+    // share short prefixes (Ali, Abu, Al-…), which then fail and strip all choices.
+    return withLocalCache.map((q) => ({
+      ...q,
+      choices: ensureCorrectAnswerInChoices(q.choices, q.answer),
     }));
   }
 
@@ -319,14 +322,8 @@ Réponds avec ce JSON exactement :
         saveLocalChoices(q.text, choices);
         return { ...q, choices };
       }
-      // Validate existing choices for similarity
-      const existingWrongs = filtrerChoixSimilaires(q.choices.filter(c => c !== q.answer), q.answer);
-      if (existingWrongs.length >= 3) {
-        return { ...q, choices: ensureCorrectAnswerInChoices(q.choices, q.answer) };
-      }
-      const choices = await regenererMauvaisesReponses(q, categorie);
-      saveLocalChoices(q.text, choices);
-      return { ...q, choices };
+      // Already has 4 choices — trust stored data
+      return { ...q, choices: ensureCorrectAnswerInChoices(q.choices, q.answer) };
     }));
 
     return results;
